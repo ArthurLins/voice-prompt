@@ -8,6 +8,7 @@ src-tauri/runtime/
 *.log
 test-results/
 *.tsbuildinfo
+release-assets/
 
 # Local credentials, recordings and workspace data
 *.pem

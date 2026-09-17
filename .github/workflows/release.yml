@@ -1,0 +1,149 @@
+name: Release Windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-windows
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test and build Windows x64
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out the selected commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate release version
+        id: version
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          $lock = Get-Content package-lock.json -Raw | ConvertFrom-Json -AsHashtable
+          $tauri = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $cargo = Get-Content src-tauri/Cargo.toml -Raw
+          $cargoLock = Get-Content src-tauri/Cargo.lock -Raw
+          $version = $package.version
+          if ($version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+            throw 'Use a stable release version in MAJOR.MINOR.PATCH format.'
+          }
+          $cargoVersion = [regex]::Match($cargo, '(?ms)^\[package\].*?^version = "([^"]+)"').Groups[1].Value
+          $cargoLockVersion = [regex]::Match($cargoLock, '(?m)^name = "voice-prompt"\r?\nversion = "([^"]+)"').Groups[1].Value
+          foreach ($candidate in @($lock.version, $lock.packages[''].version, $tauri.version, $cargoVersion, $cargoLockVersion)) {
+            if ($candidate -ne $version) { throw 'Version mismatch between package, lockfiles, Cargo and Tauri configuration.' }
+          }
+          $existingTag = git ls-remote --tags origin "refs/tags/v$version"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check existing release tags.' }
+          if ($existingTag) { throw "Tag v$version already exists. Bump the project version before creating another release." }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Set up stable Rust for Windows x64
+        run: |
+          rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install locked frontend dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Build frontend for Tauri tests
+        run: npm run build
+
+      - name: Download verified speech runtime and both models
+        run: |
+          & ./scripts/setup-voice.ps1 -Model large-v3-turbo-q5_0
+          & ./scripts/setup-voice.ps1 -Model small
+
+      - name: Run Rust tests without live API calls
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Build NSIS installer
+        run: npm run package -- --ci -- --locked
+
+      - name: Prepare installer and checksums
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = "src-tauri/target/release/bundle/nsis/Voice Prompt_$($env:RELEASE_VERSION)_x64-setup.exe"
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Installer not found: $installer" }
+          New-Item -ItemType Directory -Path release-assets | Out-Null
+          Copy-Item -LiteralPath $installer -Destination release-assets
+          $name = Split-Path -Leaf $installer
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content -Encoding utf8NoBOM release-assets/SHA256SUMS.txt
+
+      - name: Upload verified build artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-installer
+          path: release-assets/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Download this run's installer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-installer
+          path: release-assets
+
+      - name: Verify artifacts and publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum --check SHA256SUMS.txt
+          tag="v${RELEASE_VERSION}"
+          installer="Voice Prompt_${RELEASE_VERSION}_x64-setup.exe"
+          cat > release-notes.md <<'NOTES'
+          Windows x64 installer with local CPU speech processing and both Whisper models included.
+
+          Download the `x64-setup.exe` asset to install. `SHA256SUMS.txt` contains its checksum.
+          This installer is not code-signed. Close an older running instance before installing.
+          No API credentials are included; configure your own provider key in Settings.
+          NOTES
+          # Create as draft: a failed asset upload must not publish an incomplete release.
+          # Existing releases fail here instead of overwriting their assets.
+          gh release create "$tag" "$installer" SHA256SUMS.txt \
+            --target "$SOURCE_SHA" --title "Voice Prompt $tag" \
+            --notes-file release-notes.md --generate-notes --draft
+          gh release edit "$tag" --draft=false --latest
+          printf 'Published [Voice Prompt %s](https://github.com/%s/releases/tag/%s)\n' \
+            "$tag" "$GH_REPO" "$tag" >> "$GITHUB_STEP_SUMMARY"
