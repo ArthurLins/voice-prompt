@@ -79,6 +79,25 @@ pub fn build_messages(
 mod tests {
     use super::*;
     #[test]
+    fn long_input_and_previous_context_are_never_silently_truncated() {
+        let input = "Manter todas as restrições. ".repeat(4000);
+        let previous = "Existing requirement. ".repeat(4000);
+        let d = defaults();
+        let messages = build_messages(
+            "auto",
+            &d.editor_instructions,
+            &d.prompt_profiles,
+            &input,
+            &previous,
+            "equilibrado",
+        )
+        .unwrap();
+        let payload: Value =
+            serde_json::from_str(messages[1]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(payload["ditado"], input);
+        assert_eq!(payload["prompt_anterior"], previous);
+    }
+    #[test]
     fn code_defaults_are_english_and_assertive() {
         let d = defaults();
         let code = d.prompt_profiles.iter().find(|p| p.id == "code").unwrap();

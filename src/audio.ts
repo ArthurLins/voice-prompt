@@ -1,3 +1,4 @@
+export const MAX_RECORDING_SECONDS = 30 * 60;
 export function encodeWav(samples: Float32Array): Uint8Array {
   const bytes = new Uint8Array(44 + samples.length * 2),
     view = new DataView(bytes.buffer);
@@ -62,9 +63,12 @@ export class VoiceRecorder {
           return;
         }
         const samples: Float32Array = e.data.samples;
-        if (this.frames < this.context!.sampleRate * 300) {
-          this.chunks.push(samples);
-          this.frames += samples.length;
+        if (this.frames < this.context!.sampleRate * MAX_RECORDING_SECONDS) {
+          const remaining =
+            this.context!.sampleRate * MAX_RECORDING_SECONDS - this.frames;
+          const captured = samples.subarray(0, remaining);
+          this.chunks.push(captured);
+          this.frames += captured.length;
         }
         let sum = 0;
         for (const x of samples) sum += x * x;
@@ -100,9 +104,8 @@ export class VoiceRecorder {
         resolve();
       };
       this.node!.port.postMessage("stop");
-    }).catch((error) => {
-      this.dispose();
-      throw error;
+    }).catch(() => {
+      // Keep frames already received if the device/worklet stopped responding.
     });
     const samples = new Float32Array(this.frames);
     let offset = 0;
@@ -122,7 +125,7 @@ export class VoiceRecorder {
       );
     const offline = new OfflineAudioContext(
       1,
-      Math.min(4_800_000, Math.ceil((samples.length * 16000) / rate)),
+      Math.ceil((samples.length * 16000) / rate),
       16000,
     );
     const buffer = offline.createBuffer(1, samples.length, rate);
@@ -139,6 +142,7 @@ export class VoiceRecorder {
       track.onended = null;
       track.stop();
     });
+    if (this.node) this.node.port.onmessage = null;
     this.node?.disconnect();
     if (this.context) void this.context.close().catch(() => {});
     this.stream = undefined;

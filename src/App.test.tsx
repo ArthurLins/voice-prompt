@@ -44,6 +44,7 @@ vi.mock("@tauri-apps/api/window", () => ({
   }),
 }));
 vi.mock("./audio", () => ({
+  MAX_RECORDING_SECONDS: 1800,
   VoiceRecorder: class {
     start = async () => {};
     stop = async () => "local-wav";
@@ -85,7 +86,11 @@ beforeEach(() => {
       if (name === "load_workspace")
         return {
           selected: "a",
-          config: { ...defaultPromptConfig(), autoOptimize: false, alwaysOnTop: false },
+          config: {
+            ...defaultPromptConfig(),
+            autoOptimize: false,
+            alwaysOnTop: false,
+          },
           conversations: [
             {
               id: "a",
@@ -408,8 +413,72 @@ test("pending answers persist and stale question-window events are ignored", asy
   );
   expect(screen.getByRole("button", { name: "Open questions" })).toBeTruthy();
   await answer("discard", []);
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Copy" }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "Copy" }));
   await waitFor(() => expect(mock.copy).toHaveBeenCalledWith(original));
+});
+
+test("transcription failure retries the saved audio and never reuses an old refinement source", async () => {
+  const originalInvoke = mock.invoke.getMockImplementation()!;
+  const requests: Record<string, any>[] = [];
+  mock.invoke.mockImplementation(async (name, args) => {
+    if (name === "run_request") {
+      requests.push(args);
+      if (requests.length === 1) throw new Error("Whisper timed out");
+      args.channel.onmessage({
+        type: "transcript",
+        value: "Minha nova alteração",
+      });
+      return generated;
+    }
+    return originalInvoke(name, args);
+  });
+  render(<App />);
+  await screen.findByRole("button", { name: "Open prompt" });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Refine current prompt" }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Finish recording" }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[0].audioId).toBeTruthy();
+  expect(requests[1].audioId).toBe(requests[0].audioId);
+  expect(requests[1].text).toBe("");
+  expect(requests[1].previous).toBe(original);
+  expect(
+    mock.invoke.mock.calls.filter(([name]) => name === "save_recording"),
+  ).toHaveLength(1);
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull(),
+  );
+});
+
+test("a saved interrupted recording can resume after reopening", async () => {
+  const originalInvoke = mock.invoke.getMockImplementation()!;
+  const requests: Record<string, any>[] = [];
+  mock.invoke.mockImplementation(async (name, args) => {
+    if (name === "load_workspace") {
+      const stored = await originalInvoke(name, args);
+      stored.conversations[0].recovery = {
+        id: "saved-recording",
+        source: "",
+        previous: original,
+      };
+      return stored;
+    }
+    if (name === "run_request") {
+      requests.push(args);
+      return generated;
+    }
+    return originalInvoke(name, args);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(requests).toHaveLength(1));
+  expect(requests[0].audioId).toBe("saved-recording");
+  expect(requests[0].previous).toBe(original);
+  expect(
+    mock.invoke.mock.calls.some(([name]) => name === "save_recording"),
+  ).toBe(false);
 });

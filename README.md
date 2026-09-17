@@ -32,16 +32,18 @@ Settings remain in a separate window with custom scrolling. History remains in t
 
 ## Processing and storage
 
-- Speech uses bundled whisper.cpp v1.9.2 on CPU, with `small` and optional `large-v3-turbo-q5_0`. No NVIDIA SDK, CUDA Toolkit or GPU dependency. DirectML/GPU execution is not implemented.
-- Audio stays local. A resident process handles WAV PCM mono, 16 kHz, 16-bit audio over loopback with a dynamic port and random route. Readiness uses `/health`. Recordings are limited to five minutes.
+- Speech uses whisper.cpp v1.9.2 with `small` and `large-v3-turbo-q5_0`. Release builds include Vulkan acceleration for compatible AMD/NVIDIA/Intel GPUs and a separate CPU fallback. No CUDA, NVIDIA SDK or Vulkan SDK is required to run the installed app; GPU support depends on the graphics driver. DirectML is not used.
+- Audio stays local. A resident process handles WAV PCM mono, 16 kHz, 16-bit audio over loopback with a dynamic port and random route. Readiness uses `/health`. Recordings support up to 30 minutes and stop automatically at that limit. Transcription processes pause-aware chunks of at most 60 seconds, preserving every sample in order and showing progress. Each completed chunk is checkpointed; retry resumes unfinished work.
 - The original transcript, relevant previous prompt and clarification answers are sent to the configured API. The default remains OpenRouter and `openai/gpt-5.6-luna`. There is no preliminary translation API call, telemetry or web research during generation.
-- History, pending answers and preferences are stored without encryption in `%APPDATA%\com.voiceprompt.desktop\workspace.json`. API keys stay separately in Windows Credential Manager. Recorded audio is not deliberately saved in history.
-- Failed or incomplete generation does not replace a completed prompt. The transcript and pending answers are preserved; incomplete generated text is not presented as final.
+- History, pending answers and preferences are stored without encryption in `%APPDATA%\com.voiceprompt.desktop\workspace.json`. API keys stay separately in Windows Credential Manager. Finished recordings are saved separately under `recordings/` in the same application data directory, before transcription. Recovery pointers survive restart. Audio and checkpoints are removed after a completed prompt is saved or its history item is deleted. While actively recording, audio is buffered in memory; a crash before finishing can still lose that in-progress recording.
+- Failed or incomplete generation does not replace a completed prompt. **Try again** reuses saved audio if transcription failed, or the transcript if generation failed. Pending answers and the original refinement context are preserved; incomplete generated text is not presented as final. A failed refinement must be retried or its history item deleted before starting another refinement of that item; new prompts remain independent.
 - The standard flow uses streaming. Optional tool-calling clarification uses asynchronous non-streaming responses. Cancelling stops local waiting, but the provider may still complete and charge for a non-streaming request.
+
+The application accepts up to 240,000 UTF-8 bytes each for dictation and previous prompt, without silent truncation. Provider context-window and output limits still apply; use a model with adequate context. Clarification history retains its existing 200 KB safety limit and saved workspace its 20 MB limit. Long recordings consume more memory during capture and take longer on CPU. See [speech recovery and GPU details](docs/SPEECH_RECOVERY.md).
 
 ## Validation
 
-25 frontend tests and 13 Rust tests passed, covering copy, mandatory topmost state, separate question-window messaging, repeated rounds, Portuguese answers, stale events, error recovery and migration of built-in defaults without changing custom instructions. The existing live OpenRouter/Luna test passed with synthetic Portuguese input, two clarification questions and a final prompt after answers.
+27 frontend tests and 17 Rust tests passed, covering copy, mandatory topmost state, separate question-window messaging, repeated rounds, Portuguese answers, stale events, error recovery and migration of built-in defaults without changing custom instructions. The existing live OpenRouter/Luna test passed with synthetic Portuguese input, two clarification questions and a final prompt after answers.
 
 Visual previews were checked at 360 × 400 (main), 420 × 520 (questions) and 480 × 680 (settings). Native topmost ordering, multi-monitor placement and a physical microphone were not visually exercised in this change. Normal Windows topmost behavior cannot override secure desktop or lock-screen surfaces. The model's decision to ask questions is still probabilistic.
 
@@ -56,6 +58,8 @@ git clone https://github.com/ArthurLins/voice-prompt.git
 cd voice-prompt
 npm ci
 npm run setup:voice
+# Build Vulkan support (CMake + MSVC; verified SDK tooling is downloaded for the build only)
+npm run setup:vulkan
 # Optional higher-accuracy model
 npm run setup:voice -- -Model large-v3-turbo-q5_0
 npm run desktop

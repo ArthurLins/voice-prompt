@@ -4,6 +4,7 @@ use base64::Engine as _;
 use eventsource_stream::Eventsource;
 mod clarification;
 mod prompts;
+mod recordings;
 mod streaming;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -21,6 +22,7 @@ struct Engine {
     child: Child,
     url: String,
     model: String,
+    gpu: bool,
 }
 impl Drop for Engine {
     fn drop(&mut self) {
@@ -31,6 +33,7 @@ impl Drop for Engine {
 #[derive(Default)]
 struct AppState {
     engine: tokio::sync::Mutex<Option<Engine>>,
+    gpu_failed: std::sync::atomic::AtomicBool,
     jobs: Mutex<HashMap<String, CancellationToken>>,
     storage: Mutex<()>,
     document: Mutex<String>,
@@ -163,11 +166,18 @@ fn voice_status(app: tauri::AppHandle) -> Result<Value, String> {
         .filter(|m| dir.join(format!("ggml-{m}.bin")).exists())
         .collect();
     Ok(
-        json!({"ready":dir.join("whisper-server.exe").exists() && !models.is_empty(),"model":model,"models":models,"backend":"CPU"}),
+        json!({"ready":dir.join("whisper-server.exe").exists() && !models.is_empty(),"model":model,"models":models,"backend":if dir.join("vulkan/whisper-server.exe").exists() { "Vulkan / CPU fallback" } else { "CPU" }}),
     )
 }
 async fn ensure_engine(
     app: &tauri::AppHandle,
+    state: &AppState,
+    selected: &str,
+) -> Result<String, String> {
+    ensure_engine_at(&runtime_dir(app)?, state, selected).await
+}
+async fn ensure_engine_at(
+    dir: &std::path::Path,
     state: &AppState,
     selected: &str,
 ) -> Result<String, String> {
@@ -188,12 +198,34 @@ async fn ensure_engine(
         }
     }
     *guard = None;
-    let dir = runtime_dir(app)?;
     if !dir.join(&model).exists() {
         return Err(format!(
             "Model not installed. Run npm run setup:voice -- -Model {selected} and reopen the app."
         ));
     }
+    let loader_available = std::env::var_os("SystemRoot")
+        .is_some_and(|root| PathBuf::from(root).join("System32/vulkan-1.dll").exists());
+    if loader_available
+        && dir.join("vulkan/whisper-server.exe").exists()
+        && !state.gpu_failed.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        match start_engine(&dir, &model, true).await {
+            Ok(engine) => {
+                let url = engine.url.clone();
+                *guard = Some(engine);
+                return Ok(url);
+            }
+            Err(_) => state
+                .gpu_failed
+                .store(true, std::sync::atomic::Ordering::Relaxed),
+        }
+    }
+    let engine = start_engine(&dir, &model, false).await?;
+    let url = engine.url.clone();
+    *guard = Some(engine);
+    Ok(url)
+}
+async fn start_engine(dir: &std::path::Path, model: &str, gpu: bool) -> Result<Engine, String> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     drop(listener);
@@ -201,27 +233,38 @@ async fn ensure_engine(
     let threads = std::thread::available_parallelism()
         .map(|n| n.get().saturating_sub(2).clamp(1, 8))
         .unwrap_or(4);
-    let mut cmd = Command::new(dir.join("whisper-server.exe"));
-    cmd.current_dir(&dir)
-        .args([
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "--request-path",
-            &route,
-            "-m",
-            &model,
-            "-t",
-            &threads.to_string(),
-            "-ng",
-            "-nt",
-            "-l",
-            "pt",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    let mut cmd = Command::new(dir.join(if gpu {
+        "vulkan/whisper-server.exe"
+    } else {
+        "whisper-server.exe"
+    }));
+    let model_path = dir.join(model);
+    cmd.current_dir(if gpu {
+        dir.join("vulkan")
+    } else {
+        dir.to_path_buf()
+    })
+    .args([
+        "--host",
+        "127.0.0.1",
+        "--port",
+        &port.to_string(),
+        "--request-path",
+        &route,
+        "-m",
+        &model_path.to_string_lossy(),
+        "-t",
+        &threads.to_string(),
+        "-nt",
+        "-l",
+        "pt",
+    ])
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
+    if !gpu {
+        cmd.arg("-ng");
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -233,7 +276,8 @@ async fn ensure_engine(
     let mut engine = Engine {
         child,
         url: format!("http://127.0.0.1:{port}{route}"),
-        model,
+        model: model.to_owned(),
+        gpu,
     };
     let client = reqwest::Client::builder()
         .no_proxy()
@@ -258,9 +302,7 @@ async fn ensure_engine(
             .await
             .is_ok_and(|r| r.status().is_success())
         {
-            let url = engine.url.clone();
-            *guard = Some(engine);
-            return Ok(url);
+            return Ok(engine);
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -281,21 +323,33 @@ fn cancel_request(id: String, state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 fn validate_wav(bytes: &[u8]) -> Result<(), String> {
-    if bytes.len() < 46
-        || bytes.len() > 16_000 * 2 * 300 + 44
-        || &bytes[..4] != b"RIFF"
-        || &bytes[8..12] != b"WAVE"
-        || &bytes[12..16] != b"fmt "
-        || &bytes[36..40] != b"data"
-    {
-        return Err("Invalid audio or recording longer than 5 minutes.".into());
-    }
-    if u16::from_le_bytes([bytes[20], bytes[21]]) != 1
-        || u16::from_le_bytes([bytes[22], bytes[23]]) != 1
-        || u32::from_le_bytes(bytes[24..28].try_into().unwrap()) != 16000
-        || u16::from_le_bytes([bytes[34], bytes[35]]) != 16
-    {
-        return Err("Audio must be mono PCM, 16 kHz and 16-bit.".into());
+    recordings::validate(bytes)
+}
+fn recording_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = data_file(app)?.with_file_name("recordings");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+#[tauri::command]
+fn save_recording(app: tauri::AppHandle, id: String, audio: String) -> Result<(), String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(audio)
+        .map_err(|_| "Invalid audio.")?;
+    validate_wav(&bytes)?;
+    let path = recordings::path(&recording_dir(&app)?, &id)?;
+    let tmp = path.with_extension("partial");
+    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(tmp, path).map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn delete_recording(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let path = recordings::path(&recording_dir(&app)?, &id)?;
+    for file in [path.clone(), path.with_extension("json")] {
+        match std::fs::remove_file(file) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
     }
     Ok(())
 }
@@ -312,6 +366,7 @@ async fn process(
     app: &tauri::AppHandle,
     state: &AppState,
     audio: Option<String>,
+    audio_id: Option<String>,
     text: String,
     previous: String,
     settings: Settings,
@@ -322,45 +377,95 @@ async fn process(
     if !matches!(settings.language.as_str(), "pt" | "en" | "es" | "auto") {
         return Err("Invalid language.".into());
     }
-    let transcript = if let Some(audio) = audio {
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(audio)
-            .map_err(|_| "Invalid audio.")?;
-        validate_wav(&bytes)?;
-        let _ = channel.send(Progress::Phase("Preparing local speech…".into()));
-        let url = ensure_engine(app, state, &settings.voice_model).await?;
-        let _ = channel.send(Progress::Phase("Transcribing on your computer…".into()));
+    let transcript = if audio.is_some() || audio_id.is_some() {
+        let cache_path = audio_id
+            .as_ref()
+            .map(|id| recordings::path(&recording_dir(app)?, id).map(|p| p.with_extension("json")))
+            .transpose()?;
+        let bytes = if let Some(id) = &audio_id {
+            std::fs::read(recordings::path(&recording_dir(app)?, id)?)
+                .map_err(|_| "Could not read the saved recording. Check local storage.")?
+        } else {
+            base64::engine::general_purpose::STANDARD
+                .decode(audio.unwrap())
+                .map_err(|_| "Invalid audio.")?
+        };
+        let chunks = recordings::chunks(&bytes)?;
+        let mut done = cache_path
+            .as_ref()
+            .map(|p| {
+                recordings::load_checkpoint(
+                    p,
+                    &settings.voice_model,
+                    &settings.language,
+                    chunks.len(),
+                )
+            })
+            .unwrap_or_default();
         let client = reqwest::Client::builder()
             .no_proxy()
-            .timeout(Duration::from_secs(300))
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(600))
             .build()
             .map_err(|e| e.to_string())?;
-        let part = reqwest::multipart::Part::bytes(bytes)
-            .file_name("recording.wav")
-            .mime_str("audio/wav")
-            .map_err(|e| e.to_string())?;
-        let form = reqwest::multipart::Form::new()
-            .part("file", part)
-            .text("response_format", "json")
-            .text("language", settings.language.clone())
-            .text("temperature", "0.0");
-        let response = client
-            .post(format!("{url}/inference"))
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|_| "Local transcription failed. Try a shorter recording.")?;
-        if !response.status().is_success() {
-            return Err(format!(
-                "Local Whisper returned HTTP {}.",
-                response.status()
-            ));
+        for chunk in chunks.iter().skip(done.len()) {
+            let url = ensure_engine(app, state, &settings.voice_model).await?;
+            let _ = channel.send(Progress::Phase(format!(
+                "Transcribing part {} of {}…",
+                done.len() + 1,
+                chunks.len()
+            )));
+            let part = reqwest::multipart::Part::bytes(chunk.clone())
+                .file_name("recording.wav")
+                .mime_str("audio/wav")
+                .map_err(|e| e.to_string())?;
+            let form = reqwest::multipart::Form::new()
+                .part("file", part)
+                .text("response_format", "json")
+                .text("language", settings.language.clone())
+                .text("temperature", "0.0");
+            let response = client
+                .post(format!("{url}/inference"))
+                .multipart(form)
+                .send()
+                .await;
+            let response = match response {
+                Ok(r) if r.status().is_success() => r,
+                other => {
+                    let mut engine = state.engine.lock().await;
+                    if engine.as_ref().is_some_and(|e| e.gpu) {
+                        state
+                            .gpu_failed
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    *engine = None;
+                    let reason = match other {
+                        Ok(r) => format!("HTTP {}", r.status()),
+                        Err(_) => "connection failure or timeout".into(),
+                    };
+                    return Err(format!("Local transcription stopped ({reason}). Your recording and completed parts are saved. Click Try again."));
+                }
+            };
+            let value: Value = response
+                .json()
+                .await
+                .map_err(|_| "Invalid local response. Your recording is saved; click Try again.")?;
+            let text = value["text"]
+                .as_str()
+                .ok_or("Local response has no transcript. Click Try again.")?
+                .trim()
+                .to_owned();
+            done.push(text);
+            if let Some(path) = &cache_path {
+                recordings::save_checkpoint(
+                    path,
+                    &settings.voice_model,
+                    &settings.language,
+                    &done,
+                )?;
+            }
         }
-        let value: Value = response
-            .json()
-            .await
-            .map_err(|_| "Invalid response from the local transcriber.")?;
-        value["text"].as_str().unwrap_or("").trim().to_owned()
+        done.join("\n")
     } else {
         text.trim().to_owned()
     };
@@ -371,8 +476,10 @@ async fn process(
     if transcribe_only {
         return Ok(json!(transcript));
     }
-    if transcript.len() > 60_000 || previous.len() > 60_000 {
-        return Err("Text too long; limit of 60,000 bytes per field.".into());
+    if transcript.len() > 240_000 || previous.len() > 240_000 {
+        return Err(
+            "Text too long; limit of 240,000 bytes per field. Your input was preserved.".into(),
+        );
     }
     let endpoint = api_url(&settings.base_url, "chat/completions")?;
     let mut messages = prompts::build_messages(
@@ -400,7 +507,7 @@ async fn process(
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(180))
+        .timeout(Duration::from_secs(600))
         .build()
         .map_err(|e| e.to_string())?;
     let payload = completion_payload(&settings.model, settings.ask_questions, messages);
@@ -417,6 +524,7 @@ async fn process(
         return Err(match status.as_u16() {
             400 | 422 => "The API rejected the parameters. Check the model's tool support if clarification is enabled.".into(),
             401 | 403 => "Invalid key or access denied. Check the API settings.".into(),
+            413 => "The provider rejected the input size. Your recording and transcript are preserved. Choose a model with a larger context window.".into(),
             402 => "Insufficient provider balance.".into(),
             404 => "Model or endpoint not found. Check the URL and model ID."
                 .into(),
@@ -443,6 +551,7 @@ async fn run_request(
     state: State<'_, AppState>,
     id: String,
     audio: Option<String>,
+    audio_id: Option<String>,
     text: String,
     previous: String,
     settings: Settings,
@@ -461,7 +570,7 @@ async fn run_request(
     };
     let result = tokio::select! { biased;
         _ = token.cancelled() => { *state.engine.lock().await = None; Err("Operation cancelled. Received text was preserved.".into()) },
-        result = process(&app, &state, audio, text, previous, settings, channel, transcribe_only, clarification_turns) => result,
+        result = process(&app, &state, audio, audio_id, text, previous, settings, channel, transcribe_only, clarification_turns) => result,
     };
     state.jobs.lock().map_err(|e| e.to_string())?.remove(&id);
     result
@@ -637,6 +746,8 @@ fn main() {
     let app = tauri::Builder::default()
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
+            save_recording,
+            delete_recording,
             save_key,
             has_key,
             load_workspace,
@@ -676,6 +787,26 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    #[ignore = "Requires installed local CPU and Vulkan runtimes and a compatible GPU; no API calls"]
+    async fn local_vulkan_and_cpu_fallback() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
+        let state = AppState::default();
+        ensure_engine_at(&dir, &state, "large-v3-turbo-q5_0")
+            .await
+            .unwrap();
+        assert!(state.engine.lock().await.as_ref().unwrap().gpu);
+        *state.engine.lock().await = None;
+        // Same fallback state set when Vulkan fails during initialization/inference.
+        state
+            .gpu_failed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        ensure_engine_at(&dir, &state, "large-v3-turbo-q5_0")
+            .await
+            .unwrap();
+        assert!(!state.engine.lock().await.as_ref().unwrap().gpu);
+        *state.engine.lock().await = None;
+    }
     #[tokio::test]
     #[ignore = "Uses the locally saved OpenRouter key and may incur API charges"]
     async fn live_prompt_profiles() {
@@ -737,7 +868,7 @@ mod tests {
         let system = messages[0]["content"].as_str().unwrap().to_owned();
         messages[0]["content"] = json!(format!("{system}\n\n{}", clarification::INSTRUCTIONS));
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(180))
+            .timeout(Duration::from_secs(600))
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap();

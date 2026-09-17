@@ -26,7 +26,7 @@ import WindowControls from "./WindowControls";
 import { emitTo } from "@tauri-apps/api/event";
 import { completedContext } from "./conversation";
 import { normalizePromptConfig, validatePromptConfig } from "./prompts";
-import { VoiceRecorder } from "./audio";
+import { MAX_RECORDING_SECONDS, VoiceRecorder } from "./audio";
 
 type Version = { id: string; source: string; output: string; date: string };
 type Conversation = {
@@ -38,6 +38,7 @@ type Conversation = {
   updated: string;
   complete: boolean;
   pending?: PendingQuestions;
+  recovery?: { id: string; source: string; previous: string };
 };
 type Workspace = {
   conversations: Conversation[];
@@ -89,6 +90,8 @@ export default function App() {
   });
   const [windowReady, setWindowReady] = useState(false);
   const [retry, setRetry] = useState(false);
+  const completedAudio = useRef(new Set<string>());
+  const unsavedAudio = useRef(new Map<string, string>());
   const [captureMode, setCaptureMode] = useState<"new" | "refine">("new");
   const captureTarget = useRef<Conversation | null>(null);
   const captureStarting = useRef(false);
@@ -225,7 +228,15 @@ export default function App() {
       () => {
         if (desktop)
           saveQueue = saveQueue
-            .then(() => invoke<void>("save_workspace", { data: workspace }))
+            .then(async () => {
+              await invoke<void>("save_workspace", { data: workspace });
+              for (const id of completedAudio.current) {
+                if (workspace.conversations.some((c) => c.recovery?.id === id))
+                  continue;
+                await invoke("delete_recording", { id });
+                completedAudio.current.delete(id);
+              }
+            })
             .catch((e) => {
               setError(`Could not save: ${readable(e)}`);
             });
@@ -317,7 +328,7 @@ export default function App() {
     const timer = setInterval(() => {
       const elapsed = Math.floor((Date.now() - recordingStart.current) / 1000);
       setSeconds(elapsed);
-      if (elapsed >= 300) stopRef.current();
+      if (elapsed >= MAX_RECORDING_SECONDS) stopRef.current();
     }, 200);
     return () => clearInterval(timer);
   }, [recording]);
@@ -408,7 +419,9 @@ export default function App() {
     }
     if (busyRef.current) return;
     if (event.action === "discard") {
-      update(conversation.id, { pending: undefined });
+      if (conversation.recovery)
+        completedAudio.current.add(conversation.recovery.id);
+      update(conversation.id, { pending: undefined, recovery: undefined });
       setError("");
       setRetry(false);
       return;
@@ -493,7 +506,15 @@ export default function App() {
       );
       return;
     }
-    if (!audio && !targetConversation.source.trim()) return;
+    const recovery = audio
+      ? {
+          id: crypto.randomUUID(),
+          source: "",
+          previous: completedContext(targetConversation),
+        }
+      : targetConversation.recovery;
+    if (!audio && !recovery && !targetConversation.source.trim()) return;
+    if (audio && recovery) unsavedAudio.current.set(recovery.id, audio);
     busyRef.current = true;
     setBusy(true);
     setError("");
@@ -502,9 +523,15 @@ export default function App() {
     const requestSettings = pending?.settings ?? config;
     const id = crypto.randomUUID(),
       target = targetConversation.id,
-      previous = pending?.previous ?? completedContext(targetConversation);
+      previous =
+        pending?.previous ??
+        recovery?.previous ??
+        completedContext(targetConversation);
     activeRequest.current = id;
-    let source = audio ? "" : (pending?.source ?? targetConversation.source);
+    let source =
+      pending?.source ??
+      recovery?.source ??
+      (audio ? "" : targetConversation.source);
     setPhase(audio ? "Preparing audio…" : "Connecting to the model…");
 
     const channel = new Channel<Progress>();
@@ -515,15 +542,40 @@ export default function App() {
         source = event.value;
         update(target, (c) => ({
           source,
+          recovery: recovery ? { ...recovery, source } : undefined,
           title: c.title === "New conversation" ? source.slice(0, 42) : c.title,
         }));
       }
     };
     try {
+      if (recovery) {
+        update(target, { recovery });
+        const bytes = unsavedAudio.current.get(recovery.id);
+        if (bytes) {
+          await invoke("save_recording", { id: recovery.id, audio: bytes });
+          unsavedAudio.current.delete(recovery.id);
+        }
+        // Persist the recovery pointer before starting expensive work.
+        const snapshot = {
+          ...latestWorkspace.current,
+          conversations: latestWorkspace.current.conversations.map((c) =>
+            c.id === target ? { ...c, recovery } : c,
+          ),
+        };
+        const checkpointSave = saveQueue.then(() =>
+          invoke("save_workspace", { data: snapshot }),
+        );
+        saveQueue = checkpointSave.then(
+          () => {},
+          () => {},
+        );
+        await checkpointSave;
+      }
       // Context is implicit. Only completed results become the next context.
       const result = await invoke<string | QuestionResult>("run_request", {
         id,
-        audio,
+        audio: null,
+        audioId: recovery && !source ? recovery.id : null,
         text: source,
         previous,
         settings: requestSettings,
@@ -544,8 +596,10 @@ export default function App() {
         });
         return;
       }
+      if (recovery) completedAudio.current.add(recovery.id);
       update(target, (c) => ({
         pending: undefined,
+        recovery: undefined,
         output: result,
         complete: true,
         versions: [
@@ -555,7 +609,7 @@ export default function App() {
       }));
     } catch (e) {
       setError(readable(e));
-      setRetry(!pending && Boolean(source.trim()));
+      setRetry(!pending && Boolean(recovery || source.trim()));
     } finally {
       activeRequest.current = "";
       busyRef.current = false;
@@ -569,7 +623,11 @@ export default function App() {
       return;
     }
     if (locked || captureStarting.current) return;
-    if (mode === "refine" && !completedContext(conversation)) return;
+    if (
+      mode === "refine" &&
+      (!completedContext(conversation) || conversation.recovery)
+    )
+      return;
     if (!desktop || !voice.ready) {
       setError(
         desktop
@@ -590,12 +648,8 @@ export default function App() {
     recorder.current = instance;
     try {
       await instance.start(config.deviceId, setLevel, () => {
-        instance.dispose();
-        recorder.current = null;
-        setRecording(false);
-        setError(
-          "The microphone was disconnected. Select another device and record again.",
-        );
+        setNotice("Microphone disconnected. Saving the captured audio…");
+        stopRef.current();
       });
       const list = await navigator.mediaDevices.enumerateDevices();
       setDevices(list.filter((d) => d.kind === "audioinput"));
@@ -663,7 +717,12 @@ export default function App() {
         e.preventDefault();
         void toggleRecording();
       }
-      if (e.ctrlKey && e.key === "Enter" && !locked && retry) {
+      if (
+        e.ctrlKey &&
+        e.key === "Enter" &&
+        !locked &&
+        (retry || conversation.recovery)
+      ) {
         e.preventDefault();
         void run();
       }
@@ -683,6 +742,8 @@ export default function App() {
     setRetry(false);
   }
   function removeConversation() {
+    if (conversation.recovery)
+      completedAudio.current.add(conversation.recovery.id);
     setRetry(false);
     setError("");
     setWorkspace((w) => {
@@ -832,7 +893,7 @@ export default function App() {
                     aria-label="Refine current prompt"
                     title={`Refine: ${conversation.title}`}
                     onClick={() => void toggleRecording("refine")}
-                    disabled={!loaded}
+                    disabled={!loaded || Boolean(conversation.recovery)}
                   >
                     <PencilLine size={19} />
                   </button>
@@ -850,6 +911,7 @@ export default function App() {
                       ? "One moment…"
                       : "New prompt"}
               </h1>
+              {busy && phase && <p>{phase}</p>}
               {recording && (
                 <p>
                   {Math.floor(seconds / 60)}:
@@ -862,7 +924,7 @@ export default function App() {
                 {recording ? "Discard" : "Cancel"}
               </button>
             )}
-            {retry && !locked && (
+            {(retry || conversation.recovery) && !locked && (
               <button className="secondary" onClick={() => void run()}>
                 Try again
               </button>

@@ -77,11 +77,14 @@ jobs:
           & ./scripts/setup-voice.ps1 -Model large-v3-turbo-q5_0
           & ./scripts/setup-voice.ps1 -Model small
 
+      - name: Build verified Vulkan speech backend
+        run: ./scripts/build-vulkan.ps1
+
       - name: Run Rust tests without live API calls
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
       - name: Build NSIS installer
-        run: npm run package -- --ci -- --locked
+        run: npm.cmd run package -- --ci -- --locked
 
       - name: Package installer ZIP and checksums
         env:
@@ -135,7 +138,7 @@ jobs:
           tag="v${RELEASE_VERSION}"
           installer="Voice Prompt_${RELEASE_VERSION}_x64-setup.zip"
           cat > release-notes.md <<'NOTES'
-          Windows x64 installer with local CPU speech processing and both Whisper models included.
+          Windows x64 installer with local speech processing with automatic Vulkan GPU acceleration and CPU fallback and both Whisper models included.
 
           Download the `x64-setup.zip` asset, extract it, and run the installer inside. `SHA256SUMS.txt` contains the ZIP checksum.
           This installer is not code-signed. Close an older running instance before installing.
