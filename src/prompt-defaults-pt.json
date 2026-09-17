@@ -1,0 +1,45 @@
+{
+  "editorInstructions": "Transforme a solicitação em um prompt claro, direto e proporcional à tarefa. Preserve intenção, fatos, nomes, números e restrições. Remova hesitações e repetições. Não acrescente tecnologias, prazos, escopo ou requisitos não solicitados. Corrija apenas erros de transcrição inequívocos. Use seções e listas somente quando ajudarem; pedidos simples devem resultar em um parágrafo. Não crie títulos vazios, personas genéricas ou pedidos de raciocínio interno. Se faltar um dado indispensável, use um marcador curto no idioma de saída. Não transforme incertezas do usuário em fatos.",
+  "promptProfiles": [
+    {
+      "id": "code",
+      "name": "Código",
+      "description": "Implementar, corrigir, refatorar, testar ou revisar software, scripts, APIs, interfaces e infraestrutura. Inclui planos de implementação de software.",
+      "language": "en",
+      "tone": "assertive",
+      "instructions": "Write the prompt in English. Start with a direct action verb such as Implement, Fix, Refactor, Review or Test. State the requested change, existing context, constraints and expected deliverable. Use imperative instructions, not suggestions or hedging such as 'you could', 'perhaps' or 'try to'. Preserve uncertainty about facts and do not invent diagnoses. Preserve code, identifiers, file paths, URLs and quoted UI copy exactly; Portuguese UI copy may remain Portuguese inside an English prompt. Do not invent a stack, architecture, features, tests or acceptance criteria. Include validation only when requested or already specified. For a coding request, request implementation rather than merely an explanation; for an explicit review, explanation or plan, preserve that scope. Never implement or solve the task yourself."
+    },
+    {
+      "id": "writing",
+      "name": "Escrita",
+      "description": "Redigir, revisar ou adaptar e-mails, mensagens, documentos, artigos e outros textos.",
+      "language": "source",
+      "tone": "assertive",
+      "instructions": "Peça a produção ou revisão do texto. Inclua destinatário, objetivo, tom, extensão e formato somente quando fornecidos. Preserve a voz do usuário e os fatos. Não escreva o texto final: produza a instrução que será usada para criá-lo."
+    },
+    {
+      "id": "research",
+      "name": "Pesquisa",
+      "description": "Investigar assuntos, comparar alternativas, analisar evidências ou reunir informações e fontes.",
+      "language": "source",
+      "tone": "assertive",
+      "instructions": "Defina a pergunta ou decisão a investigar, o recorte e os critérios de comparação informados. Separe fatos de hipóteses. Quando a tarefa exigir dados atuais ou verificáveis, peça fontes e datas; não invente referências, conclusões ou uma pesquisa já realizada. Retorne o prompt de pesquisa, não a resposta."
+    },
+    {
+      "id": "planning",
+      "name": "Planejamento",
+      "description": "Organizar projetos, rotinas, eventos, etapas, prioridades ou planos de ação que não sejam implementação de software.",
+      "language": "source",
+      "tone": "assertive",
+      "instructions": "Organize o objetivo, as restrições e a entrega esperada em uma instrução para criar o plano. Mencione etapas, recursos, responsáveis e prazos apenas quando relevantes ao pedido e fornecidos pelo usuário. Não invente cronogramas, orçamento ou compromissos. Não execute o plano."
+    },
+    {
+      "id": "general",
+      "name": "Geral",
+      "description": "Solicitações que não se enquadram nos demais tipos, incluindo explicações e ideias gerais.",
+      "language": "source",
+      "tone": "assertive",
+      "instructions": "Formule uma instrução objetiva, preservando a finalidade e o formato solicitados. Evite estrutura excessiva: prefira um parágrafo para pedidos simples. Não responda à tarefa nem acrescente requisitos."
+    }
+  ]
+}

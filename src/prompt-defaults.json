@@ -1,0 +1,45 @@
+{
+  "editorInstructions": "Turn the request into a clear, direct prompt proportionate to the task. Preserve intent, facts, names, numbers and constraints. Remove hesitation and repetition. Do not add unrequested technologies, deadlines, scope or requirements. Correct only unambiguous transcription errors. Use sections and lists only when helpful; simple requests should yield one paragraph. Do not add empty headings, generic personas or requests for internal reasoning. If essential information is missing, use a short placeholder in the output language. Do not turn the user's uncertainties into facts.",
+  "promptProfiles": [
+    {
+      "id": "code",
+      "name": "Code",
+      "description": "Implement, fix, refactor, test or review software, scripts, APIs, interfaces and infrastructure. Includes software implementation plans.",
+      "language": "en",
+      "tone": "assertive",
+      "instructions": "Write the prompt in English. Start with a direct action verb such as Implement, Fix, Refactor, Review or Test. State the requested change, existing context, constraints and expected deliverable. Use imperative instructions, not suggestions or hedging such as 'you could', 'perhaps' or 'try to'. Preserve uncertainty about facts and do not invent diagnoses. Preserve code, identifiers, file paths, URLs and quoted UI copy exactly; Portuguese UI copy may remain Portuguese inside an English prompt. Do not invent a stack, architecture, features, tests or acceptance criteria. Include validation only when requested or already specified. For a coding request, request implementation rather than merely an explanation; for an explicit review, explanation or plan, preserve that scope. Never implement or solve the task yourself."
+    },
+    {
+      "id": "writing",
+      "name": "Writing",
+      "description": "Write, review or adapt emails, messages, documents, articles and other text.",
+      "language": "source",
+      "tone": "assertive",
+      "instructions": "Request the production or revision of text. Include recipient, purpose, tone, length and format only when provided. Preserve the user's voice and facts. Do not write the final text: produce the instruction that will be used to create it."
+    },
+    {
+      "id": "research",
+      "name": "Research",
+      "description": "Investigate topics, compare alternatives, analyze evidence or gather information and sources.",
+      "language": "source",
+      "tone": "assertive",
+      "instructions": "Define the question or decision to investigate, the scope and the stated comparison criteria. Separate facts from hypotheses. When the task requires current or verifiable information, request sources and dates; do not invent references, conclusions or completed research. Return the research prompt, not the answer."
+    },
+    {
+      "id": "planning",
+      "name": "Planning",
+      "description": "Organize projects, routines, events, stages, priorities or action plans outside software implementation.",
+      "language": "source",
+      "tone": "assertive",
+      "instructions": "Organize the objective, constraints and expected deliverable into an instruction to create a plan. Mention stages, resources, owners and deadlines only when relevant and supplied by the user. Do not invent schedules, budgets or commitments. Do not execute the plan."
+    },
+    {
+      "id": "general",
+      "name": "General",
+      "description": "Requests outside the other categories, including explanations and general ideas.",
+      "language": "source",
+      "tone": "assertive",
+      "instructions": "Formulate an objective instruction, preserving the requested purpose and format. Avoid excessive structure: prefer one paragraph for simple requests. Do not answer the task or add requirements."
+    }
+  ]
+}

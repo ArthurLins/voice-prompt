@@ -1,0 +1,26 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/target-*/
+src-tauri/gen/
+src-tauri/runtime/
+.env*
+*.log
+test-results/
+*.tsbuildinfo
+
+# Local credentials, recordings and workspace data
+*.pem
+*.key
+*.p12
+*.pfx
+*.wav
+*.mp3
+*.m4a
+workspace.json
+workspace.tmp
+*.partial
+.DS_Store
+Thumbs.db
+.codex/
+.agents/
