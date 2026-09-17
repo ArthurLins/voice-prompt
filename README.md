@@ -2,7 +2,7 @@
 
 A compact Windows assistant built with Tauri 2, Rust and React. Record a request, transcribe it locally, refine it with the configured OpenRouter model, and copy the final prompt.
 
-## Version 0.7.0
+## Version 0.7.1
 
 - The main window stays visible and always on top while the app is open. Minimize and unpin actions are removed from the main window. Close explicitly exits the app; switching to another application does not steal keyboard focus back.
 - **Copy**, beside **Open prompt**, copies the completed prompt as raw Markdown without opening the document window. **Open prompt** retains the separate rendered Markdown view.
@@ -15,7 +15,7 @@ A compact Windows assistant built with Tauri 2, Rust and React. Record a request
 
 To publish an installer ZIP, run **Actions → Release Windows → Run workflow** on `main`. The workflow tests, builds and publishes the version declared in the project. Download the ZIP from Releases, extract it, and run the installer inside. See [RELEASING.md](docs/RELEASING.md) for version updates, artifacts and failure recovery.
 
-After a local release build, the installer is written to `src-tauri/target/release/bundle/nsis/Voice Prompt_0.7.0_x64-setup.exe`. Binaries and speech models are not included in the Git repository.
+After a local release build, the installer is written to `src-tauri/target/release/bundle/nsis/Voice Prompt_0.7.1_x64-setup.exe`. Binaries and speech models are not included in the Git repository.
 Executable: `src-tauri/target/release/voice-prompt.exe`.
 
 Close any older instance before opening the new version: they share history and credentials. The standalone executable requires its `runtime` folder beside it. The installer includes the available local speech models.

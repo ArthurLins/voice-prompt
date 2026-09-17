@@ -9,11 +9,11 @@ The workflow runs only when manually dispatched. It does not run on ordinary pus
 
 ## Version and output
 
-The version comes from `package.json`. It must match `package-lock.json` (both root version entries), `src-tauri/Cargo.toml`, the application's entry in `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`. Use a stable `MAJOR.MINOR.PATCH` version, for example `0.7.0`.
+The version comes from `package.json`. It must match `package-lock.json` (both root version entries), `src-tauri/Cargo.toml`, the application's entry in `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`. Use a stable `MAJOR.MINOR.PATCH` version, for example `0.7.1`.
 
-The pipeline creates tag `v0.7.0` and release **Voice Prompt v0.7.0**, targeting the exact commit selected when the workflow started. It uploads:
+The pipeline creates tag `v0.7.1` and release **Voice Prompt v0.7.1**, targeting the exact commit selected when the workflow started. It uploads:
 
-- `Voice Prompt_0.7.0_x64-setup.zip`: contains `Voice Prompt_0.7.0_x64-setup.exe`, the Windows x64 NSIS installer including the verified Whisper runtime, `small`, and `large-v3-turbo-q5_0` models and speech license files. The executable is not uploaded separately.
+- `Voice Prompt_0.7.1_x64-setup.zip`: contains `Voice Prompt_0.7.1_x64-setup.exe`, the Windows x64 NSIS installer including the verified Whisper runtime, `small`, and `large-v3-turbo-q5_0` models and speech license files. The executable is not uploaded separately.
 - `SHA256SUMS.txt`: SHA-256 checksum of the ZIP, verified again by the publication job.
 
 The installer is unsigned, like the existing local build. The release is first created as a draft, then published only after both assets have uploaded. Successful releases are marked Latest. The build artifact is retained in Actions for seven days.
