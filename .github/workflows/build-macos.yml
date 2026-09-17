@@ -56,6 +56,11 @@ jobs:
           test "$(lipo -archs "$app/Contents/Resources/runtime/whisper-server")" = arm64
           /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$app/Contents/Info.plist"
           "$app/Contents/Resources/runtime/whisper-server" --help
+          "$app/Contents/MacOS/voice-prompt" > test-results/app-launch.log 2>&1 &
+          app_pid=$!
+          sleep 5
+          kill -0 "$app_pid"
+          kill "$app_pid"
           mkdir -p release-assets
           cp src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg release-assets/
           (cd release-assets && shasum -a 256 *.dmg > SHA256SUMS.txt)

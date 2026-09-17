@@ -1,6 +1,6 @@
 # Contributing
 
-Voice Prompt targets Windows x64. See the README for prerequisites and local speech setup.
+Voice Prompt targets Windows x64 and macOS on Apple Silicon. See the README and [macOS guide](docs/MACOS.md) for platform prerequisites and local speech setup.
 
 Keep changes focused, preserve existing workspace data and never commit API keys, transcripts, recordings, local workspace files or build artifacts. Use synthetic input in tests. Live integration tests are ignored by default because they use locally stored credentials and may consume provider credit.
 

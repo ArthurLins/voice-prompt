@@ -270,6 +270,23 @@ test("first prompt starts recording in one click and refinement appears only aft
     screen.getByRole("button", { name: "Record new prompt" }),
   ).toBeTruthy();
 });
+test("Command shortcut starts and finishes a new prompt on macOS", async () => {
+  const platform = vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+  try {
+    await openExistingApp();
+    expect(screen.getByRole("button", { name: "Record new prompt" }).title).toContain("Cmd+Shift+Space");
+    fireEvent.keyDown(window, { code: "Space", metaKey: true, shiftKey: true });
+    await screen.findByRole("button", { name: "Finish recording" });
+    fireEvent.keyDown(window, { code: "Space", metaKey: true, shiftKey: true });
+    await screen.findByText("Preparing your prompt");
+    expect(request.previous).toBe("");
+    await act(async () => resolveRequest(generated));
+    await screen.findByRole("button", { name: "Open prompt" });
+  } finally {
+    platform.mockRestore();
+  }
+});
+
 test("discarding a new recording keeps the current prompt available", async () => {
   await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });

@@ -6,4 +6,4 @@ For a sensitive vulnerability, contact the repository owner privately using a co
 
 Include affected versions, reproduction steps and impact using synthetic data. Do not include working credentials. No response-time guarantee is currently offered.
 
-Audio is processed locally, but transcripts, relevant previous prompts and clarification answers are sent to the configured provider. API keys are stored separately in Windows Credential Manager. Workspace history is local and unencrypted. See the README for operational limits.
+Audio is processed locally, but transcripts, relevant previous prompts and clarification answers are sent to the configured provider. API keys are stored separately in Windows Credential Manager or macOS Keychain. Workspace history is local and unencrypted. See the README for operational limits.
