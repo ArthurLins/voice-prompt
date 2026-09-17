@@ -20,7 +20,7 @@ To publish an installer ZIP, run **Actions → Release Windows → Run workflow*
 After a local release build, the installer is written to `src-tauri/target/release/bundle/nsis/Voice Prompt_0.7.2_x64-setup.exe`. Binaries and speech models are not included in the Git repository.
 Executable: `src-tauri/target/release/voice-prompt.exe`.
 
-Close any older instance before opening the new version: they share history and credentials. The standalone executable requires its `runtime` folder beside it. The installer includes the available local speech models.
+Close any older instance before opening the new version: they share history and credentials. The standalone executable requires its `runtime` folder beside it. The installer contains the speech runtime only. On first launch, choose a model and follow the download progress; the main screen opens after verification and speech-engine readiness. Settings → Audio can download either model or delete one while keeping at least one installed. Model changes apply immediately.
 
 ## Use
 
@@ -34,7 +34,7 @@ Settings remain in a separate window with custom scrolling. History remains in t
 
 ## Processing and storage
 
-- Speech uses whisper.cpp v1.9.2 with `small` and `large-v3-turbo-q5_0`. Release builds include Vulkan acceleration for compatible AMD/NVIDIA/Intel GPUs and a separate CPU fallback. No CUDA, NVIDIA SDK or Vulkan SDK is required to run the installed app; GPU support depends on the graphics driver. DirectML is not used.
+- Speech uses whisper.cpp v1.9.2 with `small` and `large-v3-turbo-q5_0`. Models are downloaded from the whisper.cpp model repository on Hugging Face over HTTPS, with fixed SHA-256 digests and expected sizes compiled into the Rust application. Files are verified before installation and before loading into the speech engine. Release builds include Vulkan acceleration for compatible AMD/NVIDIA/Intel GPUs and a separate CPU fallback. No CUDA, NVIDIA SDK or Vulkan SDK is required to run the installed app; GPU support depends on the graphics driver. DirectML is not used.
 - Audio stays local. A resident process handles WAV PCM mono, 16 kHz, 16-bit audio over loopback with a dynamic port and random route. Readiness uses `/health`. Recordings support up to 30 minutes and stop automatically at that limit. Transcription processes pause-aware chunks of at most 60 seconds, preserving every sample in order and showing progress. Each completed chunk is checkpointed; retry resumes unfinished work.
 - The original transcript, relevant previous prompt and clarification answers are sent to the configured API. The default remains OpenRouter and `openai/gpt-5.6-luna`. There is no preliminary translation API call, telemetry or web research during generation.
 - History, pending answers and preferences are stored without encryption in `%APPDATA%\com.voiceprompt.desktop\workspace.json`. API keys stay separately in Windows Credential Manager. Finished recordings are saved separately under `recordings/` in the same application data directory, before transcription. Recovery pointers survive restart. Audio and checkpoints are removed after a completed prompt is saved or its history item is deleted. While actively recording, audio is buffered in memory; a crash before finishing can still lose that in-progress recording.
@@ -43,9 +43,19 @@ Settings remain in a separate window with custom scrolling. History remains in t
 
 The application accepts up to 240,000 UTF-8 bytes each for dictation and previous prompt, without silent truncation. Provider context-window and output limits still apply; use a model with adequate context. Clarification history retains its existing 200 KB safety limit and saved workspace its 20 MB limit. Long recordings consume more memory during capture and take longer on CPU. See [speech recovery and GPU details](docs/SPEECH_RECOVERY.md).
 
+## Speech model downloads
+
+Models live in `%APPDATA%\com.voiceprompt.desktop\models`, survive application upgrades and are shared by CPU and Vulkan. Existing bundled models are copied once when still available and only after checksum verification. The model catalog is fixed in `src-tauri/src/models.rs`; URLs, expected sizes and hashes cannot be supplied by the UI or a downloaded manifest. Updating a model requires a code change and a new application build.
+
+Downloads use temporary `.partial` files, a size limit, connection/read timeouts, streaming SHA-256, and a second check of the saved file before rename. Failed downloads are discarded; closing the app mid-download may leave a partial file, which is overwritten on retry and never counted as installed. Downloads currently restart from zero after interruption. At least one verified model must remain when deleting, and deletion is blocked during active requests. Removing the selected model switches to the remaining model.
+
+A fresh launch needs an internet connection only to download a model. Subsequent transcription stays local. The download setup uses the existing application style; normal recording, history and prompt screens are unchanged.
+
 ## Validation
 
-33 frontend tests and 18 Rust tests passed, covering copy, persisted topmost preferences and optional thinking effort, embedded clarification and window resizing, repeated rounds, Portuguese answers, stale events, error recovery and migration of built-in defaults without changing custom instructions. The existing live OpenRouter/Luna test passed with synthetic Portuguese input, two clarification questions and a final prompt after answers.
+Dynamic-model validation includes the startup gate through engine readiness, download progress and checksum-failure retry, protection of the last model, and automatic selection/persistence after deletion. A real 488 MB `small` download passed the production downloader and fixed SHA-256 verification. Setup was visually checked at 420 × 360 in light and dark themes using simulated IPC progress.
+
+37 frontend tests and 20 Rust tests passed, covering copy, persisted topmost preferences and optional thinking effort, embedded clarification and window resizing, repeated rounds, Portuguese answers, stale events, error recovery and migration of built-in defaults without changing custom instructions. The existing live OpenRouter/Luna test passed with synthetic Portuguese input, two clarification questions and a final prompt after answers.
 
 The compact main preview (280 × 260) and embedded clarification form (420 × 520, synthetic questions) were checked in the system dark theme without page overflow. Light mode is defined through the same system CSS preference; live OS theme switching, native minimize and multi-monitor placement were not visually exercised. The model's decision to ask questions remains probabilistic.
 
@@ -59,15 +69,13 @@ Build requirements: Windows x64, Node.js 22 or later, stable Rust with MSVC, Vis
 git clone https://github.com/ArthurLins/voice-prompt.git
 cd voice-prompt
 npm ci
-npm run setup:voice
+npm run setup:voice -- -RuntimeOnly
 # Build Vulkan support (CMake + MSVC; verified SDK tooling is downloaded for the build only)
 npm run setup:vulkan
-# Optional higher-accuracy model
-npm run setup:voice -- -Model large-v3-turbo-q5_0
 npm run desktop
 ```
 
-The speech setup script downloads official binaries, licenses and models with SHA256 verification. Close the app before running it. Install `small` even when adding the larger model.
+The speech setup script downloads official binaries and licenses with SHA256 verification. Close the app before running it. Models are chosen and downloaded inside the application. The script can still fetch development models with `-Model small` or `-Model large-v3-turbo-q5_0`; they are excluded from installers.
 
 ```powershell
 npm run build

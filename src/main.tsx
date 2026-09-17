@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import HistoryWindow from "./HistoryWindow";
 import App from "./App";
+import ModelSetup from "./ModelSetup";
 import DocumentWindow from "./DocumentWindow";
 import SettingsWindow from "./SettingsWindow";
 import QuestionsWindow from "./QuestionsWindow";
@@ -17,7 +18,9 @@ createRoot(document.getElementById("root")!).render(
     ) : window.location.hash === "#settings" ? (
       <SettingsWindow />
     ) : (
-      <App />
+      <ModelSetup>
+        <App />
+      </ModelSetup>
     )}
   </React.StrictMode>,
 );

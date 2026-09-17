@@ -16,6 +16,8 @@ export default function SettingsWindow() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const savingRef = useRef(false);
+  const modelsBusyRef = useRef(false);
+  const [modelsBusy, setModelsBusy] = useState(false);
   const ack = useRef<{
     id: string;
     resolve: () => void;
@@ -39,7 +41,7 @@ export default function SettingsWindow() {
         );
         keep(
           await getCurrentWindow().onCloseRequested((e) => {
-            if (savingRef.current) e.preventDefault();
+            if (savingRef.current || modelsBusyRef.current) e.preventDefault();
           }),
         );
       }
@@ -85,13 +87,13 @@ export default function SettingsWindow() {
     };
   }, [draft.baseUrl]);
   async function close() {
-    if (savingRef.current) return;
+    if (savingRef.current || modelsBusyRef.current) return;
     setKey("");
     if (isTauri()) await getCurrentWindow().close();
     else window.close();
   }
   async function save() {
-    if (savingRef.current || !loaded) return;
+    if (savingRef.current || modelsBusyRef.current || !loaded) return;
     const validation = validatePromptConfig(draft);
     if (validation) {
       setError(validation);
@@ -168,6 +170,19 @@ export default function SettingsWindow() {
       setDraft={setDraft}
       devices={devices}
       installedModels={models}
+      modelsBusy={modelsBusy}
+      onModelsBusy={(busy) => {
+        modelsBusyRef.current = busy;
+        setModelsBusy(busy);
+      }}
+      onModelsChanged={(status) => {
+        setModels(status.models);
+        setDraft((d) =>
+          status.models.includes(d.voiceModel)
+            ? d
+            : { ...d, voiceModel: status.models[0] ?? "small" },
+        );
+      }}
       desktop={isTauri()}
       apiKey={key}
       setApiKey={setKey}

@@ -1,4 +1,4 @@
-param([ValidateSet('small', 'large-v3-turbo-q5_0')][string]$Model = 'small')
+param([ValidateSet('small', 'large-v3-turbo-q5_0')][string]$Model = 'small', [switch]$RuntimeOnly)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -26,6 +26,7 @@ Expand-Archive -LiteralPath $archivePath -DestinationPath $unpackPath -Force
 $server = Get-ChildItem -LiteralPath $unpackPath -Recurse -Filter 'whisper-server.exe' | Select-Object -First 1
 if (-not $server) { throw 'whisper-server.exe nao encontrado no pacote oficial.' }
 Get-ChildItem -LiteralPath $server.DirectoryName -File | Where-Object { $_.Extension -in '.dll', '.exe' } | Copy-Item -Destination $runtimePath -Force
+if ($RuntimeOnly) { Write-Host 'Speech runtime ready (models downloaded by the app).'; return }
 Write-Host "Baixando modelo $Model. O primeiro download pode levar alguns minutos..."
 $modelFile = "ggml-$Model.bin"
 Get-VerifiedFile "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$modelFile" (Join-Path $runtimePath $modelFile) $models[$Model]

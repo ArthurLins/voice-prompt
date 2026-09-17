@@ -231,7 +231,48 @@ export default function App() {
     };
   }, []);
   useEffect(() => {
-    if (!desktop || !loaded || !voice.ready) return;
+    if (!desktop) return;
+    let disposed = false;
+    let off: (() => void) | undefined;
+    void getCurrentWindow()
+      .listen("models-changed", () => {
+        void invoke<{ ready: boolean; model: string; models: string[] }>(
+          "voice_status",
+        )
+          .then((status) => {
+            if (!disposed) setVoice({ ...status, loaded: false });
+          })
+          .catch((e) => setError(readable(e)));
+      })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else off = unlisten;
+      });
+    return () => {
+      disposed = true;
+      off?.();
+    };
+  }, []);
+  useEffect(() => {
+    if (
+      !loaded ||
+      !voice.models.length ||
+      voice.models.includes(config.voiceModel)
+    )
+      return;
+    setWorkspace((w) => ({
+      ...w,
+      config: { ...w.config, voiceModel: voice.models[0] },
+    }));
+  }, [loaded, voice.models, config.voiceModel]);
+  useEffect(() => {
+    if (
+      !desktop ||
+      !loaded ||
+      !voice.ready ||
+      !voice.models.includes(config.voiceModel)
+    )
+      return;
     let alive = true;
     setVoice((v) => ({ ...v, loaded: false }));
     invoke("warm_voice", { model: config.voiceModel })
@@ -244,7 +285,7 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [loaded, voice.ready, config.voiceModel]);
+  }, [loaded, voice.ready, voice.models, config.voiceModel]);
   useEffect(() => {
     if (!loaded || storageFailed) return;
     const timer = setTimeout(
@@ -466,8 +507,8 @@ export default function App() {
     void getCurrentWindow()
       .setSize(
         new LogicalSize(
-          conversation.pending ? 420 : 280,
-          conversation.pending ? 520 : 260,
+          conversation.pending ? 420 : 240,
+          conversation.pending ? 520 : 224,
         ),
       )
       .catch((e) => setError(readable(e)));
@@ -871,7 +912,9 @@ export default function App() {
     };
   }, []);
   return (
-    <div className="tool-shell">
+    <div
+      className={`tool-shell${desktop && !conversation.pending ? " acrylic-main" : ""}`}
+    >
       <header className="toolbar">
         <strong
           className="window-drag"
@@ -995,7 +1038,7 @@ export default function App() {
                     onClick={() => void toggleRecording("refine")}
                     disabled={!loaded || Boolean(conversation.recovery)}
                   >
-                    <PencilLine size={19} />
+                    <PencilLine size={16} />
                   </button>
                 )}
             </div>
@@ -1015,7 +1058,7 @@ export default function App() {
               {recording && (
                 <p>
                   {Math.floor(seconds / 60)}:
-                  {String(seconds % 60).padStart(2, "0")} · Click to finish
+                  {String(seconds % 60).padStart(2, "0")}
                 </p>
               )}
             </div>
@@ -1045,7 +1088,7 @@ export default function App() {
           {completedContext(conversation) && !locked && (
             <div className="prompt-actions">
               <button
-                className="primary open-prompt"
+                className="icon-button"
                 aria-label="Open prompt"
                 title={
                   actionError.control === "Open prompt"
@@ -1058,7 +1101,7 @@ export default function App() {
                 <ExternalLink size={17} />
               </button>
               <button
-                className="secondary"
+                className="icon-button"
                 title={
                   copyError ||
                   (copied ? "Copied" : "Copy the prompt as raw Markdown")

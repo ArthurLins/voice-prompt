@@ -13,7 +13,7 @@ The version comes from `package.json`. It must match `package-lock.json` (both r
 
 The pipeline creates tag `v0.7.1` and release **Voice Prompt v0.7.1**, targeting the exact commit selected when the workflow started. It uploads:
 
-- `Voice Prompt_0.7.1_x64-setup.zip`: contains `Voice Prompt_0.7.1_x64-setup.exe`, the Windows x64 NSIS installer including the verified Whisper CPU runtime, the Vulkan server, `small`, and `large-v3-turbo-q5_0` models and speech license files. The executable is not uploaded separately.
+- `Voice Prompt_0.7.1_x64-setup.zip`: contains `Voice Prompt_0.7.1_x64-setup.exe`, the Windows x64 NSIS installer including the verified Whisper CPU runtime, the Vulkan server and speech license files. Models are downloaded and verified by the application on first use. The executable is not uploaded separately.
 - `SHA256SUMS.txt`: SHA-256 checksum of the ZIP, verified again by the publication job.
 
 The installer is unsigned, like the existing local build. The release is first created as a draft, then published only after both assets have uploaded. Successful releases are marked Latest. The build artifact is retained in Actions for seven days.
@@ -26,9 +26,9 @@ Existing tags and releases are not overwritten. Running the same version again f
 
 ## Build and failure behavior
 
-The Windows build job has read-only repository permissions. It installs locked npm dependencies, runs the frontend tests, builds the frontend, downloads the SHA256-verified speech runtime and both models, runs Rust tests with `--locked`, builds the pinned Whisper Vulkan server, and packages the installer with both CPU and Vulkan backends. Vulkan headers and shader tools are downloaded and checksum-verified only on the build machine; users do not need an SDK. Live API tests remain ignored. The separate publication job has release write permission and only downloads the resulting artifacts; it does not run application build scripts.
+The Windows build job has read-only repository permissions. It installs locked npm dependencies, runs the frontend tests, builds the frontend, downloads the SHA256-verified speech runtime without models, runs Rust tests with `--locked`, builds the pinned Whisper Vulkan server, and packages the installer with both CPU and Vulkan backends. Vulkan headers and shader tools are downloaded and checksum-verified only on the build machine; users do not need an SDK. Live API tests remain ignored. The separate publication job has release write permission and only downloads the resulting artifacts; it does not run application build scripts.
 
-A clean hosted runner must download roughly 1 GB of speech models and compile Rust dependencies, so the first run can take considerably longer than an incremental local build. Failed downloads or checksum validation stop the workflow. The build timeout is 90 minutes; publication has 20 minutes.
+A clean hosted runner must download runtime/build tooling and compile Rust dependencies, so the first run can take considerably longer than an incremental local build. Failed downloads or checksum validation stop the workflow. The build timeout is 90 minutes; publication has 20 minutes.
 
 If upload or publication fails after a draft has been created, inspect the draft and logs. Either finish uploading and publish that same draft after verifying its assets, or remove only the failed draft and any corresponding unpublished tag before retrying. Do not delete or rewrite an already published release to recover a failed run.
 

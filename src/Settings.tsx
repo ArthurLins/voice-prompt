@@ -1,6 +1,7 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { Plus, RotateCcw, Trash2, X } from "lucide-react";
 import type { Config } from "./config";
+import ModelManager, { type VoiceStatus } from "./ModelManager";
 import SettingsScroll from "./SettingsScroll";
 import WindowControls from "./WindowControls";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -13,6 +14,9 @@ type Props = {
   setDraft: Dispatch<SetStateAction<Config>>;
   devices: MediaDeviceInfo[];
   installedModels: string[];
+  onModelsChanged?: (status: VoiceStatus) => void;
+  onModelsBusy?: (busy: boolean) => void;
+  modelsBusy?: boolean;
   desktop: boolean;
   apiKey: string;
   setApiKey: (value: string) => void;
@@ -62,7 +66,7 @@ export default function Settings(props: Props) {
           <WindowControls
             closeLabel="Close settings"
             onClose={props.close}
-            closeDisabled={props.saving}
+            closeDisabled={props.saving || props.modelsBusy}
           />
         </header>
         <div className="settings-tabs" role="tablist" aria-label="Settings">
@@ -73,6 +77,7 @@ export default function Settings(props: Props) {
           }).map(([id, label]) => (
             <button
               type="button"
+              disabled={props.modelsBusy}
               role="tab"
               id={`settings-tab-${id}`}
               aria-controls="settings-content"
@@ -353,6 +358,13 @@ export default function Settings(props: Props) {
                   </option>
                 </select>
               </label>
+              {props.desktop && (
+                <ModelManager
+                  installed={props.installedModels}
+                  onChanged={(status) => props.onModelsChanged?.(status)}
+                  onBusy={props.onModelsBusy}
+                />
+              )}
             </>
           )}
           {tab === "api" && (
@@ -432,14 +444,19 @@ export default function Settings(props: Props) {
           )}
         </SettingsScroll>
         <footer className="dialog-footer">
-          <button type="button" className="secondary" onClick={props.close}>
+          <button
+            type="button"
+            className="secondary"
+            disabled={props.modelsBusy}
+            onClick={props.close}
+          >
             Cancel
           </button>
           <button
             className="primary"
             title={props.error || undefined}
             aria-invalid={Boolean(props.error)}
-            disabled={props.saving || props.loading}
+            disabled={props.saving || props.loading || props.modelsBusy}
           >
             {props.saving ? "Saving…" : props.error ? "Retry save" : "Save"}
           </button>

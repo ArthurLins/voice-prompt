@@ -1033,10 +1033,10 @@ body:has(.settings-window),
 }
 .compact-stage {
   gap: 10px;
-  padding: 8px 0 12px;
+  padding: 8px 0;
 }
 .compact-stage .voice-stage {
-  gap: 9px;
+  gap: 6px;
 }
 .compact-stage .voice-orbit {
   padding: 6px;
@@ -1049,9 +1049,10 @@ body:has(.settings-window),
   height: 68px;
 }
 .compact-stage .refine-button {
-  width: 36px;
-  height: 36px;
-  right: -48px;
+  width: 28px;
+  height: 28px;
+  right: 0;
+  bottom: 0;
 }
 .compact-stage .voice-caption h1 {
   font-size: 15px;
@@ -1065,11 +1066,6 @@ body:has(.settings-window),
   overflow: auto;
   flex-shrink: 0;
   font-size: 11px;
-}
-.tool-shell .prompt-actions button {
-  min-height: 34px;
-  padding: 8px 10px;
-  font-size: 12px;
 }
 .tool-shell button:focus-visible,
 .history-window button:focus-visible {
@@ -1242,6 +1238,19 @@ body:has(.settings-window),
   }
 }
 
+/* Reveal native acrylic only behind the desktop capture screen. */
+:root:has(.acrylic-main) {
+  background: transparent;
+}
+.tool-shell.acrylic-main {
+  background: rgb(248 249 247 / 60%);
+}
+@media (prefers-color-scheme: dark) {
+  .tool-shell.acrylic-main {
+    background: rgb(27 32 29 / 55%);
+  }
+}
+
 /* App chrome behaves like controls; documents and editable fields remain selectable. */
 body {
   user-select: none;
@@ -1258,12 +1267,7 @@ textarea,
 .tool-shell .prompt-actions {
   width: auto;
   justify-content: center;
-}
-.tool-shell .prompt-actions button {
-  width: 38px;
-  height: 36px;
-  flex: 0 0 38px;
-  padding: 0;
+  gap: 1px;
 }
 .document-copy {
   width: 34px;
@@ -1272,4 +1276,51 @@ textarea,
 }
 .voice-caption:has(h1:empty):not(:has(p)) {
   display: none;
+}
+
+.model-setup .toolbar {
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.model-setup-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding-bottom: 16px;
+}
+.model-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.model-row strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+.model-row small {
+  display: block;
+  opacity: 0.65;
+  margin-top: 3px;
+}
+.model-row button {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.model-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.model-progress progress {
+  width: 100%;
+  height: 6px;
+  accent-color: #648873;
 }

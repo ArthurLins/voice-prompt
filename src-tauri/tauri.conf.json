@@ -13,15 +13,19 @@
     "windows": [
       {
         "title": "Voice Prompt",
-        "width": 280,
-        "height": 260,
+        "width": 240,
+        "height": 224,
         "resizable": false,
         "maximizable": false,
         "minimizable": true,
         "alwaysOnTop": false,
         "visible": true,
         "decorations": false,
-        "backgroundColor": "#f8f9f7"
+        "transparent": true,
+        "backgroundColor": "#00000000",
+        "windowEffects": {
+          "effects": ["acrylic"]
+        }
       }
     ],
     "security": {
@@ -37,8 +41,6 @@
       "runtime/*.dll",
       "runtime/whisper-server.exe",
       "runtime/vulkan/*.exe",
-      "runtime/ggml-*.bin",
-      "runtime/model.json",
       "runtime/LICENSE*"
     ],
     "icon": [

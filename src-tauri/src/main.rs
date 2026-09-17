@@ -3,6 +3,7 @@
 use base64::Engine as _;
 use eventsource_stream::Eventsource;
 mod clarification;
+mod models;
 mod prompts;
 mod recordings;
 mod streaming;
@@ -33,6 +34,7 @@ impl Drop for Engine {
 #[derive(Default)]
 struct AppState {
     engine: tokio::sync::Mutex<Option<Engine>>,
+    model_operations: tokio::sync::Mutex<()>,
     gpu_failed: std::sync::atomic::AtomicBool,
     jobs: Mutex<HashMap<String, CancellationToken>>,
     storage: Mutex<()>,
@@ -181,21 +183,16 @@ fn runtime_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .join("runtime"))
 }
 #[tauri::command]
-fn voice_status(app: tauri::AppHandle) -> Result<Value, String> {
-    let dir = runtime_dir(&app)?;
-    let manifest = std::fs::read_to_string(dir.join("model.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok());
-    let model = manifest
-        .as_ref()
-        .and_then(|v| v["file"].as_str())
-        .unwrap_or("ggml-small.bin");
-    let models: Vec<&str> = ["small", "large-v3-turbo-q5_0"]
-        .into_iter()
-        .filter(|m| dir.join(format!("ggml-{m}.bin")).exists())
-        .collect();
+async fn voice_status(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
+    let _guard = state.model_operations.lock().await;
+    let dir = models::directory(&app)?;
+    models::migrate(&app, &dir).await?;
+    let installed = models::installed(&dir).await;
+    let runtime = runtime_dir(&app)?;
     Ok(
-        json!({"ready":dir.join("whisper-server.exe").exists() && !models.is_empty(),"model":model,"models":models,"backend":if dir.join("vulkan/whisper-server.exe").exists() { "Vulkan / CPU fallback" } else { "CPU" }}),
+        json!({"ready": runtime.join("whisper-server.exe").exists() && !installed.is_empty(),
+        "model": installed.first(), "models": installed,
+        "backend": if runtime.join("vulkan/whisper-server.exe").exists() { "Vulkan / CPU fallback" } else { "CPU" }}),
     )
 }
 async fn ensure_engine(
@@ -203,10 +200,30 @@ async fn ensure_engine(
     state: &AppState,
     selected: &str,
 ) -> Result<String, String> {
-    ensure_engine_at(&runtime_dir(app)?, state, selected).await
+    let spec = models::spec(selected)?;
+    {
+        let mut engine = state.engine.lock().await;
+        if let Some(engine) = engine.as_mut() {
+            if engine.model == format!("ggml-{selected}.bin")
+                && engine
+                    .child
+                    .try_wait()
+                    .map_err(|e| e.to_string())?
+                    .is_none()
+            {
+                return Ok(engine.url.clone());
+            }
+        }
+    }
+    let path = models::path(&models::directory(app)?, spec);
+    models::verify(&path, spec)
+        .await
+        .map_err(|_| "Model unavailable or corrupted. Download it in Settings / Audio.")?;
+    ensure_engine_at(&runtime_dir(app)?, &path, state, selected).await
 }
 async fn ensure_engine_at(
     dir: &std::path::Path,
+    model_path: &std::path::Path,
     state: &AppState,
     selected: &str,
 ) -> Result<String, String> {
@@ -227,9 +244,9 @@ async fn ensure_engine_at(
         }
     }
     *guard = None;
-    if !dir.join(&model).exists() {
+    if !model_path.exists() {
         return Err(format!(
-            "Model not installed. Run npm run setup:voice -- -Model {selected} and reopen the app."
+            "Model {selected} is not installed. Download it in Settings / Audio."
         ));
     }
     let loader_available = std::env::var_os("SystemRoot")
@@ -238,7 +255,7 @@ async fn ensure_engine_at(
         && dir.join("vulkan/whisper-server.exe").exists()
         && !state.gpu_failed.load(std::sync::atomic::Ordering::Relaxed)
     {
-        match start_engine(&dir, &model, true).await {
+        match start_engine(&dir, model_path, &model, true).await {
             Ok(engine) => {
                 let url = engine.url.clone();
                 *guard = Some(engine);
@@ -249,12 +266,17 @@ async fn ensure_engine_at(
                 .store(true, std::sync::atomic::Ordering::Relaxed),
         }
     }
-    let engine = start_engine(&dir, &model, false).await?;
+    let engine = start_engine(&dir, model_path, &model, false).await?;
     let url = engine.url.clone();
     *guard = Some(engine);
     Ok(url)
 }
-async fn start_engine(dir: &std::path::Path, model: &str, gpu: bool) -> Result<Engine, String> {
+async fn start_engine(
+    dir: &std::path::Path,
+    model_path: &std::path::Path,
+    model: &str,
+    gpu: bool,
+) -> Result<Engine, String> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     drop(listener);
@@ -267,7 +289,6 @@ async fn start_engine(dir: &std::path::Path, model: &str, gpu: bool) -> Result<E
     } else {
         "whisper-server.exe"
     }));
-    let model_path = dir.join(model);
     cmd.current_dir(if gpu {
         dir.join("vulkan")
     } else {
@@ -840,6 +861,8 @@ fn main() {
             save_workspace,
             voice_status,
             warm_voice,
+            models::download_model,
+            models::delete_model,
             cancel_request,
             get_document,
             open_document,
@@ -880,18 +903,28 @@ mod tests {
     async fn local_vulkan_and_cpu_fallback() {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
         let state = AppState::default();
-        ensure_engine_at(&dir, &state, "large-v3-turbo-q5_0")
-            .await
-            .unwrap();
+        ensure_engine_at(
+            &dir,
+            &dir.join("ggml-large-v3-turbo-q5_0.bin"),
+            &state,
+            "large-v3-turbo-q5_0",
+        )
+        .await
+        .unwrap();
         assert!(state.engine.lock().await.as_ref().unwrap().gpu);
         *state.engine.lock().await = None;
         // Same fallback state set when Vulkan fails during initialization/inference.
         state
             .gpu_failed
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        ensure_engine_at(&dir, &state, "large-v3-turbo-q5_0")
-            .await
-            .unwrap();
+        ensure_engine_at(
+            &dir,
+            &dir.join("ggml-large-v3-turbo-q5_0.bin"),
+            &state,
+            "large-v3-turbo-q5_0",
+        )
+        .await
+        .unwrap();
         assert!(!state.engine.lock().await.as_ref().unwrap().gpu);
         *state.engine.lock().await = None;
     }

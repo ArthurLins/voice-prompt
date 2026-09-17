@@ -395,7 +395,7 @@ test("questions resize the main window, Portuguese answers stay intact, subseque
   await screen.findByRole("button", { name: "Open prompt" });
   expect(screen.queryByRole("textbox")).toBeNull();
   expect(mock.size).toHaveBeenLastCalledWith(
-    expect.objectContaining({ width: 280, height: 260 }),
+    expect.objectContaining({ width: 240, height: 224 }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Copy" }));
   await waitFor(() => expect(mock.copy).toHaveBeenCalledWith(generated));
@@ -637,4 +637,36 @@ test("topmost preference and thinking effort persist and reach subsequent genera
   await record();
   expect(request.settings.thinkingEffort).toBe("high");
   await act(async () => resolveRequest(generated));
+});
+
+test("deleting the selected speech model switches to and persists the remaining model", async () => {
+  render(<App />);
+  await waitFor(() =>
+    expect(mock.invoke).toHaveBeenCalledWith("warm_voice", { model: "small" }),
+  );
+  const originalInvoke = mock.invoke.getMockImplementation()!;
+  mock.invoke.mockImplementation(async (name, args) =>
+    name === "voice_status"
+      ? {
+          ready: true,
+          models: ["large-v3-turbo-q5_0"],
+          model: "large-v3-turbo-q5_0",
+        }
+      : originalInvoke(name, args),
+  );
+  await act(async () => mock.listeners["models-changed"]({ payload: null }));
+  await waitFor(() =>
+    expect(mock.invoke).toHaveBeenCalledWith("warm_voice", {
+      model: "large-v3-turbo-q5_0",
+    }),
+  );
+  await waitFor(() =>
+    expect(
+      mock.invoke.mock.calls.some(
+        ([name, args]) =>
+          name === "save_workspace" &&
+          args.data.config.voiceModel === "large-v3-turbo-q5_0",
+      ),
+    ).toBe(true),
+  );
 });
