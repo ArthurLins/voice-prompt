@@ -1,4 +1,5 @@
-import { Minus, Pin, X } from "lucide-react";
+import { useState } from "react";
+import { Minus, Pin, X, CircleAlert } from "lucide-react";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -6,7 +7,7 @@ export default function WindowControls({
   closeLabel,
   closeDisabled = false,
   onClose,
-  onError,
+  onError: _onError,
   pinned,
   onPin,
   pinDisabled = false,
@@ -21,7 +22,10 @@ export default function WindowControls({
   pinDisabled?: boolean;
   hideMinimize?: boolean;
 }) {
-  const report = (e: unknown) => onError?.(String(e));
+  const [failure, setFailure] = useState({ control: "", message: "" });
+  const report = (control: string, e: unknown) => {
+    setFailure({ control, message: String(e) });
+  };
   return (
     <div className="window-controls">
       {onPin && (
@@ -41,28 +45,44 @@ export default function WindowControls({
         <button
           type="button"
           className="icon-button"
-          title="Minimize"
+          title={failure.control === "minimize" ? failure.message : "Minimize"}
           aria-label="Minimize"
           onClick={() => {
-            if (isTauri()) void getCurrentWindow().minimize().catch(report);
+            setFailure({ control: "", message: "" });
+            if (isTauri())
+              void getCurrentWindow()
+                .minimize()
+                .catch((e) => report("minimize", e));
           }}
         >
-          <Minus size={16} />
+          {failure.control === "minimize" ? (
+            <CircleAlert size={16} />
+          ) : (
+            <Minus size={16} />
+          )}
         </button>
       )}
       <button
         type="button"
         className="icon-button window-close"
-        title={closeLabel}
+        title={failure.control === "close" ? failure.message : closeLabel}
         aria-label={closeLabel}
         disabled={closeDisabled}
         onClick={() => {
+          setFailure({ control: "", message: "" });
           if (onClose) onClose();
-          else if (isTauri()) void getCurrentWindow().close().catch(report);
+          else if (isTauri())
+            void getCurrentWindow()
+              .close()
+              .catch((e) => report("close", e));
           else window.close();
         }}
       >
-        <X size={16} />
+        {failure.control === "close" ? (
+          <CircleAlert size={16} />
+        ) : (
+          <X size={16} />
+        )}
       </button>
     </div>
   );

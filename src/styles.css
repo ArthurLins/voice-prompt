@@ -1113,3 +1113,131 @@ body:has(.settings-window),
   flex-shrink: 0;
   justify-content: flex-end;
 }
+
+/* Native system preference, including changes while the app is open. */
+:root {
+  color-scheme: light dark;
+}
+.clarification-panel h1 {
+  white-space: nowrap;
+  font-size: 17px;
+  font-weight: 500;
+}
+.clarification-panel {
+  width: 100%;
+  padding: 16px 6px;
+}
+.clarification-fields {
+  flex: 1;
+}
+[aria-invalid="true"] {
+  border-color: #ae6957;
+  color: #a45947;
+}
+.voice-button:has(.lucide-circle-alert) {
+  background: #965e4e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #e1e7e1;
+    background: #1b201d;
+  }
+  .tool-shell {
+    background: radial-gradient(ellipse at 50% 37%, #262e28 0, #1b201d 65%);
+  }
+  .settings-window,
+  .history-window,
+  dialog {
+    background: #1b201d;
+    color: #e1e7e1;
+  }
+  input,
+  select,
+  textarea,
+  .secondary {
+    background: #262d28;
+    color: #e1e7e1;
+    border-color: #444f46;
+  }
+  button:not(:disabled):hover {
+    background: #354038;
+  }
+  .primary {
+    background: #456d52;
+    border-color: #5c8067;
+    color: #fff;
+  }
+  .primary:not(:disabled):hover {
+    background: #537e62;
+  }
+  .icon-button,
+  .quiet-button,
+  .text-button,
+  .document-copy,
+  .document-bar .window-drag,
+  .voice-caption p,
+  .setting-note,
+  .settings-content summary,
+  .settings-tabs button,
+  .history-list time,
+  .clarification-fields p,
+  .empty-document {
+    color: #aebbac;
+  }
+  .window-controls,
+  .dialog-header,
+  .dialog-footer,
+  .settings-content details {
+    border-color: #3b463e;
+  }
+  .voice-orbit,
+  .refine-button {
+    background: #2e3c31;
+    border-color: #4e6753;
+    color: #b9d7bd;
+  }
+  .voice-orbit::before {
+    border-color: #3b4b3e;
+  }
+  .refine-button:not(:disabled):hover,
+  .history-list button.active,
+  .settings-tabs .selected {
+    background: #354b39;
+    color: #d8ebd7;
+  }
+  .document-window {
+    background: #171c18;
+  }
+  .document-bar {
+    background: #222a24;
+    border-color: #3b463e;
+  }
+  .document-paper {
+    background: #252b25;
+    border-color: #3b463e;
+  }
+  .document-paper .markdown-content {
+    color: #e1e7dc;
+  }
+  .markdown-content pre,
+  .markdown-content code {
+    background: #1b211c;
+    border-color: #3b463e;
+  }
+  .markdown-content blockquote,
+  .document-link {
+    color: #accca4;
+  }
+  .markdown-content th,
+  .markdown-content td,
+  .markdown-content hr {
+    border-color: #4b5748;
+  }
+  .danger,
+  [aria-invalid="true"] {
+    color: #ecab96;
+  }
+  .settings-scroll-thumb {
+    background: #8b9e84;
+  }
+}

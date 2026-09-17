@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   FileText,
@@ -10,16 +11,17 @@ import {
   Mic,
   Settings2,
   Square,
-  X,
+  Check,
+  CircleAlert,
 } from "lucide-react";
 import { defaults, type Config } from "./config";
 export type { Config } from "./config";
-import {
+import Clarification, {
   type QuestionResult,
   type PendingQuestions,
   type AnsweredTurn,
 } from "./Clarification";
-import type { QuestionsSnapshot, QuestionAction } from "./QuestionsWindow";
+import type { QuestionAction } from "./QuestionsWindow";
 import type { HistoryAction, HistorySnapshot } from "./HistoryWindow";
 import WindowControls from "./WindowControls";
 import { emitTo } from "@tauri-apps/api/event";
@@ -103,7 +105,18 @@ export default function App() {
     workspace.conversations.find((c) => c.id === workspace.selected) ??
     workspace.conversations[0];
   const questionAction = useRef<(action: QuestionAction) => void>(() => {});
-  const lastQuestionRound = useRef("");
+  const [actionError, setActionError] = useState({ control: "", message: "" });
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
+  useEffect(() => {
+    setCopied(false);
+    setCopyError("");
+  }, [conversation.id, conversation.output]);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1800);
+    return () => clearTimeout(timer);
+  }, [copied]);
   const locked =
     busy || recording || starting || !loaded || Boolean(conversation.pending);
   const config = workspace.config;
@@ -396,25 +409,6 @@ export default function App() {
     };
   }, [storageFailed]);
 
-  function questionsSnapshot(): QuestionsSnapshot | null {
-    const pending = conversation.pending;
-    if (!pending) return null;
-    return {
-      conversationId: conversation.id,
-      roundId: JSON.stringify(pending.assistant),
-      pending: { questions: pending.questions, answers: pending.answers },
-      busy,
-      error,
-    };
-  }
-  async function syncQuestions(show: boolean) {
-    if (!desktop) return;
-    try {
-      await invoke("sync_questions", { data: questionsSnapshot(), show });
-    } catch (e) {
-      setError(readable(e));
-    }
-  }
   questionAction.current = (event) => {
     const pending = conversation.pending;
     if (
@@ -469,15 +463,19 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (!loaded) return;
-    const round = conversation.pending
-      ? conversation.id + JSON.stringify(conversation.pending.assistant)
-      : "";
-    const show = Boolean(round && round !== lastQuestionRound.current);
-    lastQuestionRound.current = round;
-    void syncQuestions(show);
-  }, [loaded, conversation.pending, conversation.id, busy, error]);
+    if (!desktop) return;
+    void getCurrentWindow()
+      .setSize(
+        new LogicalSize(
+          conversation.pending ? 420 : 280,
+          conversation.pending ? 520 : 260,
+        ),
+      )
+      .catch((e) => setError(readable(e)));
+  }, [loaded, Boolean(conversation.pending)]);
 
   async function openSettings() {
+    setActionError({ control: "", message: "" });
     try {
       if (desktop)
         await invoke("open_settings", {
@@ -500,7 +498,7 @@ export default function App() {
         );
       }
     } catch (e) {
-      setError(readable(e));
+      setActionError({ control: "Settings", message: readable(e) });
     }
   }
 
@@ -750,6 +748,7 @@ export default function App() {
     setRetry(false);
   }
   async function openDocument() {
+    setActionError({ control: "", message: "" });
     try {
       if (desktop)
         await invoke("open_document", {
@@ -768,7 +767,7 @@ export default function App() {
         );
       }
     } catch (e) {
-      setError(readable(e));
+      setActionError({ control: "Open prompt", message: readable(e) });
     }
   }
   function historySnapshot(): HistorySnapshot {
@@ -793,6 +792,7 @@ export default function App() {
     };
   }
   async function openHistory() {
+    setActionError({ control: "", message: "" });
     try {
       if (desktop)
         await invoke("sync_history", { data: historySnapshot(), show: true });
@@ -808,7 +808,7 @@ export default function App() {
         );
       }
     } catch (e) {
-      setError(readable(e));
+      setActionError({ control: "History", message: readable(e) });
     }
   }
   historyAction.current = (action) => {
@@ -883,19 +883,16 @@ export default function App() {
           }}
           aria-label="Voice Prompt"
           title="Voice Prompt"
-        >
-          <img
-            src="/app-icon.svg"
-            width="22"
-            height="22"
-            alt=""
-            draggable={false}
-          />
-        </strong>
+        ></strong>
         <div className="toolbar-actions">
           <button
             className="icon-button"
-            title="History"
+            title={
+              actionError.control === "History"
+                ? actionError.message
+                : "History"
+            }
+            aria-invalid={actionError.control === "History"}
             aria-label="History"
             disabled={locked}
             onClick={() => void openHistory()}
@@ -904,7 +901,12 @@ export default function App() {
           </button>
           <button
             className="icon-button"
-            title="Settings"
+            title={
+              actionError.control === "Settings"
+                ? actionError.message
+                : "Settings"
+            }
+            aria-invalid={actionError.control === "Settings"}
             aria-label="Settings"
             disabled={locked}
             onClick={() => void openSettings()}
@@ -912,45 +914,44 @@ export default function App() {
             <Settings2 size={17} />
           </button>
           <WindowControls
-            hideMinimize
             closeLabel="Close app"
             closeDisabled={desktop && !windowReady}
             onError={setError}
           />
         </div>
       </header>
-      {(error || notice) && (
-        <div
-          className={`message ${error ? "error" : ""}`}
-          role={error ? "alert" : "status"}
-        >
-          <span>{error || notice}</span>
-          <button
-            className="icon-button"
-            aria-label="Dismiss message"
-            title="Dismiss message"
-            onClick={() => {
-              setError("");
-              setNotice("");
-            }}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
       {conversation.pending ? (
-        <main className="compact-stage" aria-busy={busy}>
-          <section className="voice-stage">
-            {busy && <LoaderCircle size={27} className="spin" />}
-            <h1>{busy ? "Processing your answers" : "A few questions"}</h1>
-            <button
-              className="primary"
-              onClick={() => void syncQuestions(true)}
-            >
-              Open questions
-            </button>
-          </section>
-        </main>
+        <Clarification
+          key={conversation.id + JSON.stringify(conversation.pending.assistant)}
+          pending={conversation.pending}
+          busy={busy}
+          error={error}
+          onAnswers={(answers) =>
+            questionAction.current({
+              conversationId: conversation.id,
+              roundId: JSON.stringify(conversation.pending!.assistant),
+              action: "answers",
+              answers,
+            })
+          }
+          onSubmit={() =>
+            questionAction.current({
+              conversationId: conversation.id,
+              roundId: JSON.stringify(conversation.pending!.assistant),
+              action: "submit",
+              answers: conversation.pending!.answers,
+            })
+          }
+          onCancel={() =>
+            questionAction.current({
+              conversationId: conversation.id,
+              roundId: JSON.stringify(conversation.pending!.assistant),
+              action: "discard",
+              answers: [],
+            })
+          }
+          onStop={() => void cancel()}
+        />
       ) : (
         <main className="compact-stage" aria-busy={busy || starting}>
           <section className="voice-stage">
@@ -964,9 +965,11 @@ export default function App() {
                   recording ? "Finish recording" : "Record new prompt"
                 }
                 title={
-                  recording
+                  error ||
+                  notice ||
+                  (recording
                     ? "Finish recording (Ctrl+Shift+Space)"
-                    : "Record a new prompt (Ctrl+Shift+Space)"
+                    : "Record a new prompt (Ctrl+Shift+Space)")
                 }
                 disabled={busy || starting || !loaded}
                 onClick={() => void toggleRecording()}
@@ -975,6 +978,8 @@ export default function App() {
                   <LoaderCircle size={27} className="spin" />
                 ) : recording ? (
                   <Square size={24} fill="currentColor" />
+                ) : error ? (
+                  <CircleAlert size={30} />
                 ) : (
                   <Mic size={30} strokeWidth={1.5} />
                 )}
@@ -1020,7 +1025,11 @@ export default function App() {
               </button>
             )}
             {(retry || conversation.recovery) && !locked && (
-              <button className="secondary" onClick={() => void run()}>
+              <button
+                className="secondary"
+                title={error || "Retry processing"}
+                onClick={() => void run()}
+              >
                 Try again
               </button>
             )}
@@ -1029,24 +1038,46 @@ export default function App() {
             <div className="prompt-actions">
               <button
                 className="primary open-prompt"
-                title="Open the prompt as Markdown"
+                title={
+                  actionError.control === "Open prompt"
+                    ? actionError.message
+                    : "Open the prompt as Markdown"
+                }
+                aria-invalid={actionError.control === "Open prompt"}
                 onClick={() => void openDocument()}
               >
                 <FileText size={16} /> Open prompt
               </button>
               <button
                 className="secondary"
-                title="Copy the prompt as raw Markdown"
+                title={
+                  copyError ||
+                  (copied ? "Copied" : "Copy the prompt as raw Markdown")
+                }
+                aria-label={copied ? "Copied" : "Copy"}
                 onClick={() => {
                   void navigator.clipboard
                     .writeText(completedContext(conversation))
-                    .then(() => setNotice("Copied"))
-                    .catch(() =>
-                      setError("Could not copy the prompt. Please try again."),
-                    );
+                    .then(() => {
+                      setCopied(true);
+                      setCopyError("");
+                    })
+                    .catch(() => {
+                      setCopied(false);
+                      setCopyError(
+                        "Could not copy the prompt. Please try again.",
+                      );
+                    });
                 }}
               >
-                <Copy size={16} /> Copy
+                {copied ? (
+                  <Check size={16} />
+                ) : copyError ? (
+                  <CircleAlert size={16} />
+                ) : (
+                  <Copy size={16} />
+                )}{" "}
+                Copy
               </button>
             </div>
           )}

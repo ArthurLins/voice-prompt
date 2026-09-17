@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Check, Copy, FileText, X } from "lucide-react";
+import { Check, Copy, FileText, CircleAlert } from "lucide-react";
 import WindowControls from "./WindowControls";
 import { PromptMarkdown } from "./PromptMarkdown";
 
@@ -46,7 +46,9 @@ export default function DocumentWindow() {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
+      setError("");
     } catch {
+      setCopied(false);
       setError("Could not copy. Select the text and press Ctrl+C.");
     }
   }
@@ -67,19 +69,21 @@ export default function DocumentWindow() {
         </div>
         <button
           className="document-copy"
+          title={error || undefined}
           disabled={!text}
           onClick={() => void copy()}
         >
-          {copied ? <Check size={14} /> : <Copy size={14} />}{" "}
+          {copied ? (
+            <Check size={14} />
+          ) : error ? (
+            <CircleAlert size={14} />
+          ) : (
+            <Copy size={14} />
+          )}{" "}
           {copied ? "Copied" : "Copy Markdown"}
         </button>
         <WindowControls closeLabel="Close document" onError={setError} />
       </header>
-      {error && (
-        <p role="alert" className="document-error">
-          {error}
-        </p>
-      )}
       <main className="document-scroll" tabIndex={0}>
         <article className="document-paper" key={text}>
           {text ? (

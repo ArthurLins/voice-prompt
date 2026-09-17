@@ -86,7 +86,12 @@ test("cancel discards draft and a failed save remains visible", async () => {
       payload: { id: mock.emit.mock.calls[0][2].id, error: "Disk unavailable" },
     }),
   );
-  expect(await screen.findByRole("alert")).toBeTruthy();
+  expect(
+    (await screen.findByRole("button", { name: "Retry save" })).getAttribute(
+      "title",
+    ),
+  ).toContain("Disk unavailable");
+  expect(screen.queryByRole("alert")).toBeNull();
   expect(mock.close).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(mock.close).toHaveBeenCalledOnce());

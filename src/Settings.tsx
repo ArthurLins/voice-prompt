@@ -397,16 +397,16 @@ export default function Settings(props: Props) {
           )}
         </SettingsScroll>
         <footer className="dialog-footer">
-          {props.error && (
-            <p role="alert" className="form-error">
-              {props.error}
-            </p>
-          )}
           <button type="button" className="secondary" onClick={props.close}>
             Cancel
           </button>
-          <button className="primary" disabled={props.saving || props.loading}>
-            {props.saving ? "Saving…" : "Save"}
+          <button
+            className="primary"
+            title={props.error || undefined}
+            aria-invalid={Boolean(props.error)}
+            disabled={props.saving || props.loading}
+          >
+            {props.saving ? "Saving…" : props.error ? "Retry save" : "Save"}
           </button>
         </footer>
       </form>

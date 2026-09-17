@@ -4,10 +4,10 @@ A compact Windows assistant built with Tauri 2, Rust and React. Record a request
 
 ## Version 0.7.1
 
-- The main window is a compact, fixed 280 × 260 window. Icon controls retain hover descriptions and accessible names. Every startup selects a fresh conversation; previous prompts, unfinished recordings and pending questions remain available only through History.
+- The main window is compact at 280 × 260, expanding to 420 × 520 during clarification. Icon controls retain hover descriptions and accessible names. Every startup selects a fresh conversation; previous prompts, unfinished recordings and pending questions remain available only through History.
 - The main window stays visible and always on top while the app is open. Minimize and unpin actions are removed from the main window. Close explicitly exits the app; switching to another application does not steal keyboard focus back.
 - **Copy**, beside **Open prompt**, copies the completed prompt as raw Markdown without opening the document window. **Open prompt** retains the separate rendered Markdown view.
-- Optional clarification uses a separate, always-on-top **Questions** window. The main window remains available. Answers can be free text or choices, including multiple questions together. After each submission the model processes the answers and asks further questions only when necessary.
+- Optional clarification appears immediately inside the expanded main window under **Waiting for your answers**. Answers can be free text or choices, including multiple questions together. After each submission the model processes the answers and asks further questions only when necessary.
 - App-owned interface text, status/error messages, default profile descriptions, system instructions and installer UI are English. New clarification questions and alternatives are requested in English.
 - Portuguese speech and typed answers reach processing in their original language. There is no preliminary translation step. The selected output profile still controls the final prompt language; the Code profile remains English and assertive.
 - Existing conversations, identifiers, model/provider settings, custom rules and output profiles are preserved. Only untouched built-in Portuguese defaults are migrated to equivalent English text.
@@ -27,7 +27,7 @@ The large recording button starts a **new prompt** immediately. The smaller penc
 
 Enable **Settings → Prompts → Clarify uncertainties before generating** to use questions. It is off by default. Answer in Portuguese or another supported language, select an option, or leave unavailable information blank. **Continue** submits the available answers together. A final result is accepted only when the model completes the prompt. The input, previous prompt and settings for that request stay attached to it throughout all rounds.
 
-Closing the Questions window does not discard the request; **Open questions** brings it back. **Discard questions** ends clarification and preserves the last completed prompt. Pending questions and answers are saved with the workspace and resume after restarting. Error recovery retains the answers.
+**Discard questions** ends clarification and preserves the last completed prompt. Pending questions and answers are saved with the workspace and can be reopened from History after restarting. Error recovery retains the answers.
 
 Settings remain in a separate window with custom scrolling. History remains in the main window and deletes the selected conversation directly. Profiles, output language, tone and editor rules remain editable in Settings → Prompts. Settings → Audio selects the microphone, transcription language and local model. Settings → Connection configures the API URL, model and key.
 
@@ -44,9 +44,9 @@ The application accepts up to 240,000 UTF-8 bytes each for dictation and previou
 
 ## Validation
 
-31 frontend tests and 17 Rust tests passed, covering copy, mandatory topmost state, separate question-window messaging, repeated rounds, Portuguese answers, stale events, error recovery and migration of built-in defaults without changing custom instructions. The existing live OpenRouter/Luna test passed with synthetic Portuguese input, two clarification questions and a final prompt after answers.
+32 frontend tests and 17 Rust tests passed, covering copy, mandatory topmost state, embedded clarification and window resizing, repeated rounds, Portuguese answers, stale events, error recovery and migration of built-in defaults without changing custom instructions. The existing live OpenRouter/Luna test passed with synthetic Portuguese input, two clarification questions and a final prompt after answers.
 
-Current browser previews were checked at 280 × 260 (main) and 380 × 480 (history). The unchanged question/settings previews were previously checked at 420 × 520 and 480 × 680. Native topmost ordering, multi-monitor placement and a physical microphone were not visually exercised in this change. Normal Windows topmost behavior cannot override secure desktop or lock-screen surfaces. The model's decision to ask questions is still probabilistic.
+The compact main preview (280 × 260) and embedded clarification form (420 × 520, synthetic questions) were checked in the system dark theme without page overflow. Light mode is defined through the same system CSS preference; live OS theme switching, native minimize and multi-monitor placement were not visually exercised. The model's decision to ask questions remains probabilistic.
 
 See [the API review](docs/API_REVIEW.md) for protocol details and the previous verification evidence. The 0.7.0 window/language behavior described here supersedes its 0.6.0 interface description.
 
@@ -90,3 +90,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [THIRD_P
 ## License
 
 [MIT](LICENSE), copyright © 2026 Arthur Lins. Third-party components retain their own licenses.
+
+The interface follows the operating system light/dark preference. The main title bar has no app icon and restores the minimize control using the native window action. Feedback stays in existing controls (with detailed errors available on hover); copying shows a check on the copy button. No alert banners or toasts are displayed. Windows title-bar controls remain custom-drawn to preserve the frameless design.

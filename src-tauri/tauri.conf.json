@@ -17,7 +17,7 @@
         "height": 260,
         "resizable": false,
         "maximizable": false,
-        "minimizable": false,
+        "minimizable": true,
         "alwaysOnTop": true,
         "visible": true,
         "decorations": false,

@@ -19,6 +19,7 @@ export type PendingQuestions = QuestionResult & {
 export default function Clarification({
   pending,
   busy,
+  error = "",
   onAnswers,
   onSubmit,
   onCancel,
@@ -26,6 +27,7 @@ export default function Clarification({
 }: {
   pending: Pick<PendingQuestions, "questions" | "answers">;
   busy: boolean;
+  error?: string;
   onAnswers: (answers: string[]) => void;
   onSubmit: () => void;
   onCancel: () => void;
@@ -39,7 +41,7 @@ export default function Clarification({
         onSubmit();
       }}
     >
-      <h1>Before generating</h1>
+      <h1>Waiting for your answers</h1>
       <div className="clarification-fields">
         <p>Answer what you know. Blank fields remain open.</p>
         {pending.questions.map((q, index) => (
@@ -93,9 +95,15 @@ export default function Clarification({
         >
           {busy ? "Cancel" : "Discard questions"}
         </button>
-        <button className="primary" disabled={busy} type="submit">
+        <button
+          className="primary"
+          title={error || undefined}
+          aria-invalid={Boolean(error)}
+          disabled={busy}
+          type="submit"
+        >
           {busy && <LoaderCircle size={14} className="spin" />}
-          {busy ? "Processing…" : "Continue"}
+          {busy ? "Processing…" : error ? "Try again" : "Continue"}
         </button>
       </footer>
     </form>

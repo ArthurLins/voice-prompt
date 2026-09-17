@@ -17,6 +17,7 @@ const mock = vi.hoisted(() => ({
   top: vi.fn(),
   close: vi.fn(),
   minimize: vi.fn(),
+  size: vi.fn().mockResolvedValue(undefined),
   listeners: {} as Record<string, (event: any) => Promise<void>>,
 }));
 vi.mock("@tauri-apps/api/event", () => ({
@@ -32,6 +33,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     setAlwaysOnTop: mock.top,
+    setSize: mock.size,
     onCloseRequested: async () => () => {},
     close: mock.close,
     minimize: mock.minimize,
@@ -68,6 +70,7 @@ beforeEach(() => {
     this.setAttribute("open", "");
   };
   mock.top.mockResolvedValue(undefined);
+  mock.minimize.mockResolvedValue(undefined);
   mock.copy.mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -214,7 +217,8 @@ test("settings opens outside the main interface and minimizing uses the native c
     ),
   );
   expect(screen.queryByRole("textbox", { name: "Model" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Minimize" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Minimize" }));
+  expect(mock.minimize).toHaveBeenCalled();
   expect(mock.top).toHaveBeenCalledWith(true);
 });
 test("saving settings preserves conversation and current pin preference", async () => {
@@ -286,9 +290,16 @@ test("main remains topmost and copies the completed Markdown without opening a d
   await screen.findByRole("button", { name: "Open prompt" });
   expect(mock.top).toHaveBeenCalledWith(true);
   expect(screen.queryByRole("button", { name: "Always on top" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Minimize" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Minimize" }));
+  expect(mock.minimize).toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Copy" }));
   await waitFor(() => expect(mock.copy).toHaveBeenCalledWith(original));
+  expect(
+    screen
+      .getByRole("button", { name: "Copied" })
+      .querySelector(".lucide-check"),
+  ).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
   expect(
     mock.invoke.mock.calls.some(([name]) => name === "open_document"),
   ).toBe(false);
@@ -320,37 +331,43 @@ async function enableQuestions() {
     }),
   );
 }
-function questionSnapshot() {
-  return mock.invoke.mock.calls
-    .filter(([name]) => name === "sync_questions")
-    .at(-1)![1].data;
-}
 async function answer(action: string, answers: string[]) {
-  const snapshot = questionSnapshot();
-  await act(async () =>
-    mock.listeners["question-action"]({
-      payload: {
-        conversationId: snapshot.conversationId,
-        roundId: snapshot.roundId,
-        action,
-        answers,
-      },
-    }),
-  );
+  if (action === "discard") {
+    fireEvent.click(screen.getByRole("button", { name: "Discard questions" }));
+    return;
+  }
+  screen.getAllByRole("textbox").forEach((field, index) => {
+    fireEvent.change(field, { target: { value: answers[index] } });
+  });
+  if (action === "submit") {
+    fireEvent.click(screen.getByRole("button", { name: /Continue|Try again/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Processing…" })).toBeTruthy(),
+    );
+  }
 }
-test("questions are external, Portuguese answers stay intact, subsequent rounds lead to final output", async () => {
+
+test("questions resize the main window, Portuguese answers stay intact, subsequent rounds lead to final output", async () => {
   await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
   await enableQuestions();
   await record();
   expect(request.settings.askQuestions).toBe(true);
   await act(async () => resolveRequest(questionResult));
-  await screen.findByRole("button", { name: "Open questions" });
-  expect(screen.queryByRole("textbox")).toBeNull();
-  expect(questionSnapshot().pending.questions).toEqual(
-    questionResult.questions,
+  await screen.findByText("Waiting for your answers");
+  expect(screen.getAllByRole("textbox")).toHaveLength(2);
+  expect(mock.size).toHaveBeenLastCalledWith(
+    expect.objectContaining({ width: 420, height: 520 }),
   );
-  await answer("submit", ["Para minha equipe brasileira", "Plan"]);
+  expect(
+    mock.invoke.mock.calls.some(([name]) => name === "sync_questions"),
+  ).toBe(false);
+  fireEvent.change(screen.getByRole("textbox", { name: "Who is this for?" }), {
+    target: { value: "Para minha equipe brasileira" },
+  });
+  fireEvent.click(screen.getByRole("radio", { name: "Plan" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await waitFor(() => expect(request.clarificationTurns).toHaveLength(1));
   expect(request.previous).toBe(original);
   expect(request.clarificationTurns[0].answers).toEqual([
     "Para minha equipe brasileira",
@@ -370,13 +387,16 @@ test("questions are external, Portuguese answers stay intact, subsequent rounds 
     "Não adicione bibliotecas",
   ]);
   await act(async () => rejectRequest(new Error("Network unavailable")));
-  expect(questionSnapshot().pending.answers).toEqual([
+  expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
     "Não adicione bibliotecas",
-  ]);
+  );
   await answer("submit", ["Não adicione bibliotecas"]);
   await act(async () => resolveRequest(generated));
   await screen.findByRole("button", { name: "Open prompt" });
-  expect(questionSnapshot()).toBeNull();
+  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(mock.size).toHaveBeenLastCalledWith(
+    expect.objectContaining({ width: 280, height: 260 }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Copy" }));
   await waitFor(() => expect(mock.copy).toHaveBeenCalledWith(generated));
 });
@@ -415,17 +435,23 @@ test("pending answers persist and stale question-window events are ignored", asy
   await act(async () =>
     mock.listeners["question-action"]({
       payload: {
-        ...questionSnapshot(),
+        conversationId: "a",
         roundId: "stale",
         action: "discard",
         answers: [],
       },
     }),
   );
-  expect(screen.getByRole("button", { name: "Open questions" })).toBeTruthy();
+  expect(screen.getByText("Waiting for your answers")).toBeTruthy();
   await answer("discard", []);
   fireEvent.click(await screen.findByRole("button", { name: "Copy" }));
   await waitFor(() => expect(mock.copy).toHaveBeenCalledWith(original));
+  expect(
+    screen
+      .getByRole("button", { name: "Copied" })
+      .querySelector(".lucide-check"),
+  ).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 test("transcription failure retries the saved audio and never reuses an old refinement source", async () => {
@@ -547,4 +573,23 @@ test("history deletion uses the separate window event and never a browser confir
     }),
   );
   confirm.mockRestore();
+});
+
+test("copy errors stay on the copy control without a banner or opening the document", async () => {
+  await openExistingApp();
+  mock.copy.mockRejectedValueOnce(new Error("Clipboard unavailable"));
+  fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Copy" }).getAttribute("title"),
+    ).toContain("Could not copy"),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(
+    screen
+      .getByRole("button", { name: "Copy" })
+      .querySelector(".lucide-circle-alert"),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+  expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
 });

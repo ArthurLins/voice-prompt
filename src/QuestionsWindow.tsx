@@ -107,14 +107,10 @@ export default function QuestionsWindow() {
           onError={setError}
         />
       </header>
-      {(error || snapshot?.error) && (
-        <p className="document-error" role="alert">
-          {error || snapshot?.error}
-        </p>
-      )}
       {snapshot ? (
         <Clarification
           pending={snapshot.pending}
+          error={error || snapshot.error}
           busy={snapshot.busy || sending}
           onAnswers={(answers) => {
             const next = {

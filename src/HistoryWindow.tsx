@@ -24,6 +24,7 @@ export default function HistoryWindow() {
   });
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
+  const [failedAction, setFailedAction] = useState("");
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let disposed = false;
@@ -61,6 +62,8 @@ export default function HistoryWindow() {
   }, []);
   async function act(action: HistoryAction) {
     if (!loaded || data.locked) return;
+    setError("");
+    setFailedAction("");
     try {
       if (isTauri()) await emitTo("main", "history-action", action);
       else {
@@ -79,6 +82,7 @@ export default function HistoryWindow() {
         else window.close();
       }
     } catch (e) {
+      setFailedAction(action.action + action.id);
       setError(String(e));
     }
   }
@@ -108,19 +112,18 @@ export default function HistoryWindow() {
         className="history-search"
         aria-label="Search conversations"
         placeholder="Search"
+        title={!failedAction ? error || undefined : undefined}
+        aria-invalid={Boolean(error && !failedAction)}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
-      {error && (
-        <p className="message error" role="alert">
-          {error}
-        </p>
-      )}
       <nav aria-label="Conversations" className="history-list">
         {rows.map((c) => (
           <div className="history-row" key={c.id}>
             <button
               className={c.id === data.selected ? "active" : ""}
+              title={failedAction === "select" + c.id ? error : undefined}
+              aria-invalid={failedAction === "select" + c.id}
               disabled={!loaded || data.locked}
               onClick={() => void act({ action: "select", id: c.id })}
             >
@@ -134,7 +137,10 @@ export default function HistoryWindow() {
             </button>
             <button
               className="icon-button danger"
-              title={`Delete ${c.title}`}
+              title={
+                failedAction === "delete" + c.id ? error : `Delete ${c.title}`
+              }
+              aria-invalid={failedAction === "delete" + c.id}
               aria-label={`Delete ${c.title}`}
               disabled={!loaded || data.locked}
               onClick={() => void act({ action: "delete", id: c.id })}
@@ -150,6 +156,8 @@ export default function HistoryWindow() {
       <footer className="dialog-footer">
         <button
           className="primary"
+          title={failedAction === "new" ? error : undefined}
+          aria-invalid={failedAction === "new"}
           disabled={!loaded || data.locked}
           onClick={() => void act({ action: "new", id: "" })}
         >
