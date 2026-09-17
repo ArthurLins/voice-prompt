@@ -35,7 +35,8 @@
     ],
     "resources": [
       "runtime/*.dll",
-      "runtime/**/whisper-server*.exe",
+      "runtime/whisper-server.exe",
+      "runtime/vulkan/*.exe",
       "runtime/ggml-*.bin",
       "runtime/model.json",
       "runtime/LICENSE*"
