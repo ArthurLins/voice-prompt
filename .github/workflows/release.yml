@@ -1,152 +1,138 @@
-name: Release Windows
+name: Release Windows and macOS
 
 on:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-windows
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build:
+  validate:
+    name: Validate tag and project versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - run: node --test scripts/release-version.test.mjs
+      - name: Require a matching version tag
+        id: version
+        run: node scripts/release-version.mjs
+
+  windows:
     name: Test and build Windows x64
-    if: github.ref == 'refs/heads/main'
+    needs: validate
     runs-on: windows-2022
     timeout-minutes: 90
     defaults:
       run:
         shell: pwsh
-    outputs:
-      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Check out the selected commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Validate release version
-        id: version
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $package = Get-Content package.json -Raw | ConvertFrom-Json
-          $lock = Get-Content package-lock.json -Raw | ConvertFrom-Json -AsHashtable
-          $tauri = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
-          $cargo = Get-Content src-tauri/Cargo.toml -Raw
-          $cargoLock = Get-Content src-tauri/Cargo.lock -Raw
-          $version = $package.version
-          if ($version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
-            throw 'Use a stable release version in MAJOR.MINOR.PATCH format.'
-          }
-          $cargoVersion = [regex]::Match($cargo, '(?ms)^\[package\].*?^version = "([^"]+)"').Groups[1].Value
-          $cargoLockVersion = [regex]::Match($cargoLock, '(?m)^name = "voice-prompt"\r?\nversion = "([^"]+)"').Groups[1].Value
-          foreach ($candidate in @($lock.version, $lock.packages[''].version, $tauri.version, $cargoVersion, $cargoLockVersion)) {
-            if ($candidate -ne $version) { throw 'Version mismatch between package, lockfiles, Cargo and Tauri configuration.' }
-          }
-          $existingTag = git ls-remote --tags origin "refs/tags/v$version"
-          if ($LASTEXITCODE -ne 0) { throw 'Could not check existing release tags.' }
-          if ($existingTag) { throw "Tag v$version already exists. Bump the project version before creating another release." }
-          "version=$version" >> $env:GITHUB_OUTPUT
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
-
       - name: Set up stable Rust for Windows x64
         run: |
           rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           rustup default stable
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Install locked frontend dependencies
-        run: npm ci
-
-      - name: Run frontend tests
-        run: npm test
-
-      - name: Build frontend for Tauri tests
-        run: npm run build
-
-      - name: Download verified speech runtime
-        run: |
-          & ./scripts/setup-voice.ps1 -RuntimeOnly
-
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Download verified CPU speech runtime
+        run: ./scripts/setup-voice.ps1 -RuntimeOnly
       - name: Build verified Vulkan speech backend
         run: ./scripts/build-vulkan.ps1
-
-      - name: Run Rust tests without live API calls
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
-
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - name: Build NSIS installer
         run: npm.cmd run package -- --ci -- --locked
-
-      - name: Package installer ZIP and checksums
+      - name: Collect installer and checksum
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = "src-tauri/target/release/bundle/nsis/Voice Prompt_$($env:RELEASE_VERSION)_x64-setup.exe"
-          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Installer not found: $installer" }
+          $name = "Voice Prompt_$($env:RELEASE_VERSION)_x64-setup.exe"
           New-Item -ItemType Directory -Path release-assets | Out-Null
-          $zip = "release-assets/Voice Prompt_$($env:RELEASE_VERSION)_x64-setup.zip"
-          # NSIS already compresses the installer; avoid compressing it a second time.
-          Compress-Archive -LiteralPath $installer -DestinationPath $zip -CompressionLevel NoCompression
-          $name = Split-Path -Leaf $zip
-          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item -LiteralPath "src-tauri/target/release/bundle/nsis/$name" -Destination release-assets
+          $hash = (Get-FileHash -LiteralPath "release-assets/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $name" | Set-Content -Encoding utf8NoBOM release-assets/SHA256SUMS.txt
-
-      - name: Upload verified build artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-installer
           path: release-assets/*
           if-no-files-found: error
           compression-level: 0
-          retention-days: 7
+          retention-days: 14
+
+  macos:
+    name: Test and build Apple Silicon
+    needs: validate
+    uses: ./.github/workflows/build-macos.yml
 
   publish:
-    name: Publish GitHub release
-    needs: build
+    name: Publish both installers together
+    needs: [validate, windows, macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: write
     steps:
-      - name: Download this run's installer
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: windows-installer
-          path: release-assets
-
+          path: release-assets/windows
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Voice-Prompt-macOS-Apple-Silicon
+          path: release-assets/macos
       - name: Verify artifacts and publish release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_VERSION: ${{ needs.build.outputs.version }}
-          SOURCE_SHA: ${{ github.sha }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -euo pipefail
           cd release-assets
+          (cd windows && sha256sum --check SHA256SUMS.txt)
+          (cd macos && sha256sum --check SHA256SUMS.txt)
+          windows="Voice Prompt_${RELEASE_VERSION}_x64-setup.exe"
+          macos="Voice Prompt_${RELEASE_VERSION}_aarch64.dmg"
+          cp "windows/$windows" "macos/$macos" .
+          cat windows/SHA256SUMS.txt macos/SHA256SUMS.txt > SHA256SUMS.txt
           sha256sum --check SHA256SUMS.txt
-          tag="v${RELEASE_VERSION}"
-          installer="Voice Prompt_${RELEASE_VERSION}_x64-setup.zip"
           cat > release-notes.md <<'NOTES'
-          Windows x64 installer with local speech processing with automatic Vulkan GPU acceleration and CPU fallback and speech models downloaded on first use with SHA-256 verification.
+          Installers for Windows x64 and macOS 13+ on Apple Silicon (M1 or later).
 
-          Download the `x64-setup.zip` asset, extract it, and run the installer inside. `SHA256SUMS.txt` contains the ZIP checksum.
-          This installer is not code-signed. Close an older running instance before installing.
-          No API credentials are included; configure your own provider key in Settings.
+          - Windows: download and run x64-setup.exe. Includes Vulkan acceleration and CPU fallback.
+          - Mac: download aarch64.dmg, open it, and drag Voice Prompt into Applications. Includes Metal acceleration and CPU fallback.
+          - Speech models are downloaded and SHA-256 verified inside the app on first use.
+          - SHA256SUMS.txt verifies both installers.
+
+          Windows is unsigned. The Mac app is ad-hoc signed and not notarized; macOS may require approval in Privacy & Security. Close older instances before installing. Configure your own provider key in Settings; no credentials are included.
           NOTES
-          # Create as draft: a failed asset upload must not publish an incomplete release.
-          # Existing releases fail here instead of overwriting their assets.
-          gh release create "$tag" "$installer" SHA256SUMS.txt \
-            --target "$SOURCE_SHA" --title "Voice Prompt $tag" \
+          tag="v${RELEASE_VERSION}"
+          # Both builds must succeed. Publish only after every asset has uploaded.
+          # Never create a missing tag or overwrite an existing release.
+          gh release create "$tag" "$windows" "$macos" SHA256SUMS.txt \
+            --verify-tag --title "Voice Prompt $tag" \
             --notes-file release-notes.md --generate-notes --draft
           gh release edit "$tag" --draft=false --latest
           printf 'Published [Voice Prompt %s](https://github.com/%s/releases/tag/%s)\n' \

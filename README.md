@@ -2,7 +2,7 @@
 
 A compact Windows and macOS (Apple Silicon) assistant built with Tauri 2, Rust and React. Record a request, transcribe it locally, refine it with the configured OpenRouter model, and copy the final prompt. See [macOS setup and distribution](docs/MACOS.md) for the Apple Silicon build and validation requirements.
 
-## Version 0.7.2
+## Version 1.0.0
 
 - The main window is compact at 240 × 224, expanding to 420 × 520 during clarification. Icon controls retain hover descriptions and accessible names. Every startup selects a fresh conversation; previous prompts, unfinished recordings and pending questions remain available only through History.
 - **Settings → Prompts → Always on top** controls whether the main window stays above other applications. The preference survives restarts. Minimize remains available; switching applications does not steal keyboard focus back.
@@ -15,9 +15,9 @@ A compact Windows and macOS (Apple Silicon) assistant built with Tauri 2, Rust a
 
 ## Run
 
-To publish an installer ZIP, run **Actions → Release Windows → Run workflow** on `main`. The workflow tests, builds and publishes the version declared in the project. Download the ZIP from Releases, extract it, and run the installer inside. See [RELEASING.md](docs/RELEASING.md) for version updates, artifacts and failure recovery.
+Push a version tag such as `v1.0.0` to publish a release. **Release Windows and macOS** verifies that the tag matches every manifest, builds both platforms, and publishes the Windows x64 `.exe`, Apple Silicon `.dmg`, and SHA-256 checksums together. See [RELEASING.md](docs/RELEASING.md) for the commands and failure recovery.
 
-After a local release build, the installer is written to `src-tauri/target/release/bundle/nsis/Voice Prompt_0.7.2_x64-setup.exe`. Binaries and speech models are not included in the Git repository.
+After a local Windows release build, the installer is written to `src-tauri/target/release/bundle/nsis/Voice Prompt_1.0.0_x64-setup.exe`. Binaries and speech models are not included in the Git repository.
 Executable: `src-tauri/target/release/voice-prompt.exe`.
 
 Close any older instance before opening the new version: they share history and credentials. The standalone executable requires its `runtime` folder beside it. The installer contains the speech runtime only. On first launch, choose a model and follow the download progress; the main screen opens after verification and speech-engine readiness. Settings → Audio can download either model or delete one while keeping at least one installed. Model changes apply immediately.

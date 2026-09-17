@@ -33,7 +33,7 @@ Tauri automatically merges `src-tauri/tauri.macos.conf.json`. Output: `src-tauri
 
 **Build macOS Apple Silicon** uses a native ARM Mac runner. It runs frontend/Rust tests, transcribes a known sample on CPU, builds the DMG, and verifies bundle signatures, architecture, microphone metadata, and the speech executable. The `Voice-Prompt-macOS-Apple-Silicon` artifact contains the DMG and SHA256 checksum.
 
-It runs on pushes to `codex/macos-support` and supports manual dispatch once on the default branch. It does not publish a GitHub release. Hosted runners cannot validate live microphone capture, native appearance, Keychain prompts, or physical GPU performance.
+It supports manual dispatch for standalone builds and is reused by **Release Windows and macOS** on version tags such as `v1.0.0`. The release workflow waits for both Windows and Mac before publishing their installers together. Standalone Mac builds only upload an Actions artifact. Hosted runners cannot validate live microphone capture, native appearance, Keychain prompts, or physical GPU performance.
 
 ## Signing
 
