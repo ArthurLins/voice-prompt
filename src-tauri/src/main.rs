@@ -41,11 +41,39 @@ struct AppState {
     history_snapshot: Mutex<Value>,
     questions_snapshot: Mutex<Value>,
 }
+#[derive(Deserialize, Serialize, Clone, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum ThinkingEffort {
+    #[default]
+    Default,
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+fn apply_thinking_effort(payload: &mut Value, base: &str, effort: &ThinkingEffort) {
+    if *effort == ThinkingEffort::Default {
+        return;
+    }
+    let openrouter = reqwest::Url::parse(base)
+        .ok()
+        .is_some_and(|url| url.host_str() == Some("openrouter.ai"));
+    if openrouter {
+        payload["reasoning"] = json!({"effort": effort});
+    } else {
+        payload["reasoning_effort"] = json!(effort);
+    }
+}
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Settings {
     base_url: String,
     model: String,
+    #[serde(default)]
+    thinking_effort: ThinkingEffort,
     style: String,
     language: String,
     voice_model: String,
@@ -511,7 +539,8 @@ async fn process(
         .timeout(Duration::from_secs(600))
         .build()
         .map_err(|e| e.to_string())?;
-    let payload = completion_payload(&settings.model, settings.ask_questions, messages);
+    let mut payload = completion_payload(&settings.model, settings.ask_questions, messages);
+    apply_thinking_effort(&mut payload, &settings.base_url, &settings.thinking_effort);
     let response = client
         .post(endpoint)
         .bearer_auth(key)
@@ -696,7 +725,7 @@ async fn sync_history(
             .resizable(true)
             .maximizable(false)
             .minimizable(true)
-            .always_on_top(true)
+            .always_on_top(data["alwaysOnTop"].as_bool().unwrap_or(true))
             .visible(false)
             .build()
             .map_err(|e| e.to_string())?,
@@ -705,6 +734,9 @@ async fn sync_history(
         None
     };
     if let Some(window) = window {
+        window
+            .set_always_on_top(data["alwaysOnTop"].as_bool().unwrap_or(true))
+            .map_err(|e| e.to_string())?;
         window
             .emit("history-state", &data)
             .map_err(|e| e.to_string())?;
@@ -891,6 +923,33 @@ mod tests {
             let output = streaming::collect(response.bytes_stream().eventsource(), |_| {}).await.unwrap();
             println!("LIVE_EVAL mode={mode}\nINPUT: {input}\nOUTPUT: {output}\n");
         }
+    }
+    #[test]
+    fn thinking_effort_uses_provider_format_without_changing_defaults() {
+        for questions in [false, true] {
+            let original = completion_payload("existing-model", questions, json!([]));
+            let mut payload = original.clone();
+            apply_thinking_effort(
+                &mut payload,
+                "https://openrouter.ai/api/v1",
+                &ThinkingEffort::Default,
+            );
+            assert_eq!(payload, original);
+            for effort in ["none", "minimal", "low", "medium", "high", "xhigh", "max"] {
+                let setting: ThinkingEffort = serde_json::from_value(json!(effort)).unwrap();
+                let mut router = original.clone();
+                apply_thinking_effort(&mut router, "https://openrouter.ai/api/v1", &setting);
+                assert_eq!(router["reasoning"]["effort"], effort);
+                assert!(router.get("reasoning_effort").is_none());
+                let mut compatible = original.clone();
+                apply_thinking_effort(&mut compatible, "http://localhost:8080/v1", &setting);
+                assert_eq!(compatible["reasoning_effort"], effort);
+                assert!(compatible.get("reasoning").is_none());
+            }
+        }
+        let old: Settings = serde_json::from_value(json!({"baseUrl":"https://openrouter.ai/api/v1","model":"existing-model","style":"conciso","language":"pt","voiceModel":"small"})).unwrap();
+        assert!(old.thinking_effort == ThinkingEffort::Default);
+        assert!(serde_json::from_value::<ThinkingEffort>(json!("invalid")).is_err());
     }
     #[test]
     fn request_format_preserves_model_and_optional_tools() {

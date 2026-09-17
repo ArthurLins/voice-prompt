@@ -2,11 +2,12 @@
 
 A compact Windows assistant built with Tauri 2, Rust and React. Record a request, transcribe it locally, refine it with the configured OpenRouter model, and copy the final prompt.
 
-## Version 0.7.1
+## Version 0.7.2
 
 - The main window is compact at 280 × 260, expanding to 420 × 520 during clarification. Icon controls retain hover descriptions and accessible names. Every startup selects a fresh conversation; previous prompts, unfinished recordings and pending questions remain available only through History.
-- The main window stays visible and always on top while the app is open. Minimize and unpin actions are removed from the main window. Close explicitly exits the app; switching to another application does not steal keyboard focus back.
-- **Copy**, beside **Open prompt**, copies the completed prompt as raw Markdown without opening the document window. **Open prompt** retains the separate rendered Markdown view.
+- **Settings → Prompts → Always on top** controls whether the main window stays above other applications. The preference survives restarts. Minimize remains available; switching applications does not steal keyboard focus back.
+- Prompt actions are icon-only with tooltips and accessible names. **Copy** copies raw Markdown; **Open prompt** uses an external-window icon to open the rendered document. App chrome is non-selectable; editable fields and the prompt document retain text selection.
+- **Settings → Connection → Thinking effort** controls reasoning effort. **Model default** preserves existing request behavior. Explicit levels depend on the model/provider; OpenRouter uses `reasoning.effort`, while other OpenAI-compatible endpoints use `reasoning_effort`.
 - Optional clarification appears immediately inside the expanded main window under **Waiting for your answers**. Answers can be free text or choices, including multiple questions together. After each submission the model processes the answers and asks further questions only when necessary.
 - App-owned interface text, status/error messages, default profile descriptions, system instructions and installer UI are English. New clarification questions and alternatives are requested in English.
 - Portuguese speech and typed answers reach processing in their original language. There is no preliminary translation step. The selected output profile still controls the final prompt language; the Code profile remains English and assertive.
@@ -16,7 +17,7 @@ A compact Windows assistant built with Tauri 2, Rust and React. Record a request
 
 To publish an installer ZIP, run **Actions → Release Windows → Run workflow** on `main`. The workflow tests, builds and publishes the version declared in the project. Download the ZIP from Releases, extract it, and run the installer inside. See [RELEASING.md](docs/RELEASING.md) for version updates, artifacts and failure recovery.
 
-After a local release build, the installer is written to `src-tauri/target/release/bundle/nsis/Voice Prompt_0.7.1_x64-setup.exe`. Binaries and speech models are not included in the Git repository.
+After a local release build, the installer is written to `src-tauri/target/release/bundle/nsis/Voice Prompt_0.7.2_x64-setup.exe`. Binaries and speech models are not included in the Git repository.
 Executable: `src-tauri/target/release/voice-prompt.exe`.
 
 Close any older instance before opening the new version: they share history and credentials. The standalone executable requires its `runtime` folder beside it. The installer includes the available local speech models.
@@ -44,7 +45,7 @@ The application accepts up to 240,000 UTF-8 bytes each for dictation and previou
 
 ## Validation
 
-32 frontend tests and 17 Rust tests passed, covering copy, mandatory topmost state, embedded clarification and window resizing, repeated rounds, Portuguese answers, stale events, error recovery and migration of built-in defaults without changing custom instructions. The existing live OpenRouter/Luna test passed with synthetic Portuguese input, two clarification questions and a final prompt after answers.
+33 frontend tests and 18 Rust tests passed, covering copy, persisted topmost preferences and optional thinking effort, embedded clarification and window resizing, repeated rounds, Portuguese answers, stale events, error recovery and migration of built-in defaults without changing custom instructions. The existing live OpenRouter/Luna test passed with synthetic Portuguese input, two clarification questions and a final prompt after answers.
 
 The compact main preview (280 × 260) and embedded clarification form (420 × 520, synthetic questions) were checked in the system dark theme without page overflow. Light mode is defined through the same system CSS preference; live OS theme switching, native minimize and multi-monitor placement were not visually exercised. The model's decision to ask questions remains probabilistic.
 

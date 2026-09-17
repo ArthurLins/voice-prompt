@@ -168,7 +168,7 @@ test("refinement stays explicit and the prompt is only passed to its separate wi
   await waitFor(() =>
     expect(mock.invoke).toHaveBeenCalledWith("open_document", {
       text: generated,
-      alwaysOnTop: true,
+      alwaysOnTop: false,
     }),
   );
 });
@@ -219,7 +219,7 @@ test("settings opens outside the main interface and minimizing uses the native c
   expect(screen.queryByRole("textbox", { name: "Model" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Minimize" }));
   expect(mock.minimize).toHaveBeenCalled();
-  expect(mock.top).toHaveBeenCalledWith(true);
+  expect(mock.top).toHaveBeenCalledWith(false);
 });
 test("saving settings preserves conversation and current pin preference", async () => {
   await openExistingApp();
@@ -280,15 +280,15 @@ test("discarding a new recording keeps the current prompt available", async () =
   await waitFor(() =>
     expect(mock.invoke).toHaveBeenCalledWith("open_document", {
       text: original,
-      alwaysOnTop: true,
+      alwaysOnTop: false,
     }),
   );
 });
 
-test("main remains topmost and copies the completed Markdown without opening a document", async () => {
+test("main respects its stored topmost preference and copies the completed Markdown without opening a document", async () => {
   await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
-  expect(mock.top).toHaveBeenCalledWith(true);
+  expect(mock.top).toHaveBeenCalledWith(false);
   expect(screen.queryByRole("button", { name: "Always on top" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Minimize" }));
   expect(mock.minimize).toHaveBeenCalled();
@@ -592,4 +592,49 @@ test("copy errors stay on the copy control without a banner or opening the docum
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Copy" }));
   expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+});
+
+test("topmost preference and thinking effort persist and reach subsequent generation", async () => {
+  await openExistingApp();
+  expect(mock.top).toHaveBeenLastCalledWith(false);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await waitFor(() =>
+    expect(mock.invoke).toHaveBeenCalledWith(
+      "open_settings",
+      expect.anything(),
+    ),
+  );
+  const config = mock.invoke.mock.calls.find(
+    ([name]) => name === "open_settings",
+  )![1].config;
+  expect(config.thinkingEffort).toBe("default");
+  for (const pinned of [true, false]) {
+    await act(async () =>
+      mock.listeners["settings-save"]({
+        payload: {
+          id: "preferences",
+          config: { ...config, alwaysOnTop: pinned, thinkingEffort: "high" },
+        },
+      }),
+    );
+    await waitFor(() => expect(mock.top).toHaveBeenLastCalledWith(pinned));
+  }
+  expect(mock.invoke).toHaveBeenCalledWith("save_workspace", {
+    data: expect.objectContaining({
+      config: expect.objectContaining({
+        alwaysOnTop: false,
+        thinkingEffort: "high",
+      }),
+    }),
+  });
+  const open = screen.getByRole("button", { name: "Open prompt" });
+  expect(open.textContent?.trim()).toBe("");
+  expect(open.title).toContain("another window");
+  expect(screen.getByRole("button", { name: "Copy" }).textContent?.trim()).toBe(
+    "",
+  );
+  expect(screen.queryByText("New prompt")).toBeNull();
+  await record();
+  expect(request.settings.thinkingEffort).toBe("high");
+  await act(async () => resolveRequest(generated));
 });

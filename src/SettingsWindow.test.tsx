@@ -55,7 +55,11 @@ test("settings are persisted by the main window and close only after acknowledgm
       name: "Clarify uncertainties before generating",
     }),
   );
+  fireEvent.click(screen.getByRole("checkbox", { name: "Always on top" }));
   fireEvent.click(screen.getByRole("tab", { name: "Connection" }));
+  fireEvent.change(screen.getByLabelText("Thinking effort"), {
+    target: { value: "high" },
+  });
   fireEvent.change(screen.getByLabelText("Model"), {
     target: { value: "example/model" },
   });
@@ -65,6 +69,8 @@ test("settings are persisted by the main window and close only after acknowledgm
   expect([target, event]).toEqual(["main", "settings-save"]);
   expect(payload.config.model).toBe("example/model");
   expect(payload.config.askQuestions).toBe(true);
+  expect(payload.config.alwaysOnTop).toBe(false);
+  expect(payload.config.thinkingEffort).toBe("high");
   expect(mock.close).not.toHaveBeenCalled();
   await act(async () =>
     mock.handlers["settings-saved"]({ payload: { id: payload.id, error: "" } }),

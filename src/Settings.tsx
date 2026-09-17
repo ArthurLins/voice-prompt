@@ -91,6 +91,16 @@ export default function Settings(props: Props) {
               <label className="check-label">
                 <input
                   type="checkbox"
+                  checked={draft.alwaysOnTop}
+                  onChange={(e) =>
+                    setDraft({ ...draft, alwaysOnTop: e.target.checked })
+                  }
+                />
+                Always on top
+              </label>
+              <label className="check-label">
+                <input
+                  type="checkbox"
                   checked={draft.askQuestions ?? false}
                   onChange={(e) =>
                     setDraft({ ...draft, askQuestions: e.target.checked })
@@ -367,6 +377,31 @@ export default function Settings(props: Props) {
                   }
                 />
               </label>
+              <label>
+                Thinking effort
+                <select
+                  value={draft.thinkingEffort ?? "default"}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      thinkingEffort: e.target
+                        .value as Config["thinkingEffort"],
+                    })
+                  }
+                >
+                  <option value="default">Model default</option>
+                  <option value="none">None</option>
+                  <option value="minimal">Minimal</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="xhigh">Extra high</option>
+                  <option value="max">Maximum</option>
+                </select>
+              </label>
+              <p className="setting-note">
+                Supported effort levels depend on the model and provider.
+              </p>
               <label>
                 API key
                 <input

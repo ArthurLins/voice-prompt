@@ -1241,3 +1241,35 @@ body:has(.settings-window),
     background: #8b9e84;
   }
 }
+
+/* App chrome behaves like controls; documents and editable fields remain selectable. */
+body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+input,
+textarea,
+[contenteditable="true"],
+.document-paper,
+.document-paper * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.tool-shell .prompt-actions {
+  width: auto;
+  justify-content: center;
+}
+.tool-shell .prompt-actions button {
+  width: 38px;
+  height: 36px;
+  flex: 0 0 38px;
+  padding: 0;
+}
+.document-copy {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+.voice-caption:has(h1:empty):not(:has(p)) {
+  display: none;
+}

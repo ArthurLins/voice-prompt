@@ -69,7 +69,10 @@ export default function DocumentWindow() {
         </div>
         <button
           className="document-copy"
-          title={error || undefined}
+          title={
+            error || (copied ? "Copied" : "Copy the prompt as raw Markdown")
+          }
+          aria-label={copied ? "Copied" : "Copy Markdown"}
           disabled={!text}
           onClick={() => void copy()}
         >
@@ -79,8 +82,7 @@ export default function DocumentWindow() {
             <CircleAlert size={14} />
           ) : (
             <Copy size={14} />
-          )}{" "}
-          {copied ? "Copied" : "Copy Markdown"}
+          )}
         </button>
         <WindowControls closeLabel="Close document" onError={setError} />
       </header>

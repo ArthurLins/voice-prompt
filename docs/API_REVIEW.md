@@ -47,3 +47,8 @@ Referências: [client tool calling do OpenRouter](https://openrouter.ai/docs/gui
 - As respostas textuais também são enviadas ao provedor; áudio permanece local. O histórico, inclusive esclarecimentos, continua sem criptografia, como antes. A chave permanece separada no cofre.
 
 Teste real opcional: `cargo test --manifest-path src-tauri/Cargo.toml live_clarification -- --ignored --nocapture`. Exige chave local e pode consumir saldo.
+
+
+## 0.7.2: optional thinking effort
+
+Checked [OpenRouter reasoning documentation](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens). `thinkingEffort` defaults to `default`, which omits the API parameter. Explicit choices are serialized as `reasoning.effort` for the exact OpenRouter host and `reasoning_effort` for configured OpenAI-compatible endpoints. The same option applies to streaming generation and non-streaming clarification rounds; saved pending rounds retain their request settings. No models or providers were changed. Supported levels vary by model/provider, and unsupported choices retain the existing recoverable API error behavior. No live, billable request was made for this change.

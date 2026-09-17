@@ -3,7 +3,7 @@ import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-  FileText,
+  ExternalLink,
   Copy,
   PencilLine,
   History,
@@ -13,6 +13,8 @@ import {
   Square,
   Check,
   CircleAlert,
+  X,
+  RotateCcw,
 } from "lucide-react";
 import { defaults, type Config } from "./config";
 export type { Config } from "./config";
@@ -123,7 +125,7 @@ export default function App() {
   useEffect(() => {
     if (!desktop || !loaded) return;
     void getCurrentWindow()
-      .setAlwaysOnTop(true)
+      .setAlwaysOnTop(config.alwaysOnTop)
       .catch((e) =>
         setError(`Could not keep the window on top: ${readable(e)}`),
       );
@@ -193,7 +195,6 @@ export default function App() {
                         settings: {
                           ...c.pending.settings,
                           ...normalizePromptConfig(c.pending.settings),
-                          alwaysOnTop: true,
                         },
                       }
                     : undefined,
@@ -204,7 +205,6 @@ export default function App() {
               ...stored.config,
               ...normalizePromptConfig(stored.config),
               autoOptimize: true,
-              alwaysOnTop: true,
             },
           });
         }
@@ -381,7 +381,6 @@ export default function App() {
               ...latestWorkspace.current,
               config: {
                 ...payload.config,
-                alwaysOnTop: true,
               },
             };
             latestWorkspace.current = next;
@@ -773,6 +772,7 @@ export default function App() {
   function historySnapshot(): HistorySnapshot {
     return {
       selected: conversation.id,
+      alwaysOnTop: config.alwaysOnTop,
       locked: busy || recording || starting || !loaded,
       conversations: workspace.conversations
         .filter(
@@ -991,7 +991,7 @@ export default function App() {
                   <button
                     className="refine-button"
                     aria-label="Refine current prompt"
-                    title={`Refine: ${conversation.title}`}
+                    title={`Correct or refine the current prompt: ${conversation.title}`}
                     onClick={() => void toggleRecording("refine")}
                     disabled={!loaded || Boolean(conversation.recovery)}
                   >
@@ -1009,7 +1009,7 @@ export default function App() {
                     ? "Preparing your prompt"
                     : starting
                       ? "One moment…"
-                      : "New prompt"}
+                      : null}
               </h1>
               {busy && phase && <p>{phase}</p>}
               {recording && (
@@ -1020,17 +1020,25 @@ export default function App() {
               )}
             </div>
             {(busy || recording) && (
-              <button className="quiet-button" onClick={() => void cancel()}>
-                {recording ? "Discard" : "Cancel"}
+              <button
+                className="quiet-button"
+                aria-label={recording ? "Discard" : "Cancel"}
+                title={
+                  recording ? "Discard this recording" : "Cancel processing"
+                }
+                onClick={() => void cancel()}
+              >
+                <X size={16} />
               </button>
             )}
             {(retry || conversation.recovery) && !locked && (
               <button
                 className="secondary"
-                title={error || "Retry processing"}
+                aria-label="Try again"
+                title={error || "Retry processing the saved input"}
                 onClick={() => void run()}
               >
-                Try again
+                <RotateCcw size={16} />
               </button>
             )}
           </section>
@@ -1038,15 +1046,16 @@ export default function App() {
             <div className="prompt-actions">
               <button
                 className="primary open-prompt"
+                aria-label="Open prompt"
                 title={
                   actionError.control === "Open prompt"
                     ? actionError.message
-                    : "Open the prompt as Markdown"
+                    : "Open the prompt in another window"
                 }
                 aria-invalid={actionError.control === "Open prompt"}
                 onClick={() => void openDocument()}
               >
-                <FileText size={16} /> Open prompt
+                <ExternalLink size={17} />
               </button>
               <button
                 className="secondary"
@@ -1076,8 +1085,7 @@ export default function App() {
                   <CircleAlert size={16} />
                 ) : (
                   <Copy size={16} />
-                )}{" "}
-                Copy
+                )}
               </button>
             </div>
           )}

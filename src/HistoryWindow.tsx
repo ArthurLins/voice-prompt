@@ -7,6 +7,7 @@ import WindowControls from "./WindowControls";
 
 export type HistorySnapshot = {
   selected: string;
+  alwaysOnTop?: boolean;
   locked: boolean;
   conversations: {
     id: string;
