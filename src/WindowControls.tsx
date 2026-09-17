@@ -53,7 +53,7 @@ export default function WindowControls({
       <button
         type="button"
         className="icon-button window-close"
-        title="Close"
+        title={closeLabel}
         aria-label={closeLabel}
         disabled={closeDisabled}
         onClick={() => {

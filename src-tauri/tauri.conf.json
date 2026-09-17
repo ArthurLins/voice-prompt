@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Voice Prompt",
-        "width": 360,
-        "height": 400,
+        "width": 280,
+        "height": 260,
         "resizable": false,
         "maximizable": false,
         "minimizable": false,

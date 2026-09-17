@@ -4,6 +4,7 @@ A compact Windows assistant built with Tauri 2, Rust and React. Record a request
 
 ## Version 0.7.1
 
+- The main window is a compact, fixed 280 × 260 window. Icon controls retain hover descriptions and accessible names. Every startup selects a fresh conversation; previous prompts, unfinished recordings and pending questions remain available only through History.
 - The main window stays visible and always on top while the app is open. Minimize and unpin actions are removed from the main window. Close explicitly exits the app; switching to another application does not steal keyboard focus back.
 - **Copy**, beside **Open prompt**, copies the completed prompt as raw Markdown without opening the document window. **Open prompt** retains the separate rendered Markdown view.
 - Optional clarification uses a separate, always-on-top **Questions** window. The main window remains available. Answers can be free text or choices, including multiple questions together. After each submission the model processes the answers and asks further questions only when necessary.
@@ -43,9 +44,9 @@ The application accepts up to 240,000 UTF-8 bytes each for dictation and previou
 
 ## Validation
 
-27 frontend tests and 17 Rust tests passed, covering copy, mandatory topmost state, separate question-window messaging, repeated rounds, Portuguese answers, stale events, error recovery and migration of built-in defaults without changing custom instructions. The existing live OpenRouter/Luna test passed with synthetic Portuguese input, two clarification questions and a final prompt after answers.
+31 frontend tests and 17 Rust tests passed, covering copy, mandatory topmost state, separate question-window messaging, repeated rounds, Portuguese answers, stale events, error recovery and migration of built-in defaults without changing custom instructions. The existing live OpenRouter/Luna test passed with synthetic Portuguese input, two clarification questions and a final prompt after answers.
 
-Visual previews were checked at 360 × 400 (main), 420 × 520 (questions) and 480 × 680 (settings). Native topmost ordering, multi-monitor placement and a physical microphone were not visually exercised in this change. Normal Windows topmost behavior cannot override secure desktop or lock-screen surfaces. The model's decision to ask questions is still probabilistic.
+Current browser previews were checked at 280 × 260 (main) and 380 × 480 (history). The unchanged question/settings previews were previously checked at 420 × 520 and 480 × 680. Native topmost ordering, multi-monitor placement and a physical microphone were not visually exercised in this change. Normal Windows topmost behavior cannot override secure desktop or lock-screen surfaces. The model's decision to ask questions is still probabilistic.
 
 See [the API review](docs/API_REVIEW.md) for protocol details and the previous verification evidence. The 0.7.0 window/language behavior described here supersedes its 0.6.0 interface description.
 

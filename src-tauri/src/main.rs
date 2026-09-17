@@ -38,6 +38,7 @@ struct AppState {
     storage: Mutex<()>,
     document: Mutex<String>,
     settings_snapshot: Mutex<Value>,
+    history_snapshot: Mutex<Value>,
     questions_snapshot: Mutex<Value>,
 }
 #[derive(Deserialize, Clone)]
@@ -664,6 +665,59 @@ async fn open_settings(
 }
 
 #[tauri::command]
+fn get_history(state: State<'_, AppState>) -> Result<Value, String> {
+    Ok(state
+        .history_snapshot
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone())
+}
+#[tauri::command]
+async fn sync_history(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    data: Value,
+    show: bool,
+) -> Result<(), String> {
+    *state.history_snapshot.lock().map_err(|e| e.to_string())? = data.clone();
+    let window = if let Some(window) = app.get_webview_window("history") {
+        Some(window)
+    } else if show {
+        Some(
+            tauri::WebviewWindowBuilder::new(
+                &app,
+                "history",
+                tauri::WebviewUrl::App("index.html#history".into()),
+            )
+            .title("History")
+            .inner_size(380.0, 480.0)
+            .min_inner_size(300.0, 300.0)
+            .decorations(false)
+            .resizable(true)
+            .maximizable(false)
+            .minimizable(true)
+            .always_on_top(true)
+            .visible(false)
+            .build()
+            .map_err(|e| e.to_string())?,
+        )
+    } else {
+        None
+    };
+    if let Some(window) = window {
+        window
+            .emit("history-state", &data)
+            .map_err(|e| e.to_string())?;
+        if show {
+            window.unminimize().map_err(|e| e.to_string())?;
+            window.show().map_err(|e| e.to_string())?;
+            window.set_focus().map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn get_questions(state: State<'_, AppState>) -> Result<Value, String> {
     Ok(state
         .questions_snapshot
@@ -760,6 +814,8 @@ fn main() {
             open_settings,
             get_settings,
             run_request,
+            get_history,
+            sync_history,
             get_questions,
             sync_questions
         ])

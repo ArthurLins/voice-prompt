@@ -8,10 +8,8 @@ import {
   History,
   LoaderCircle,
   Mic,
-  Plus,
   Settings2,
   Square,
-  Trash2,
   X,
 } from "lucide-react";
 import { defaults, type Config } from "./config";
@@ -22,6 +20,7 @@ import {
   type AnsweredTurn,
 } from "./Clarification";
 import type { QuestionsSnapshot, QuestionAction } from "./QuestionsWindow";
+import type { HistoryAction, HistorySnapshot } from "./HistoryWindow";
 import WindowControls from "./WindowControls";
 import { emitTo } from "@tauri-apps/api/event";
 import { completedContext } from "./conversation";
@@ -80,8 +79,7 @@ export default function App() {
     [starting, setStarting] = useState(false);
   const [seconds, setSeconds] = useState(0),
     [level, setLevel] = useState(0);
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]),
-    [query, setQuery] = useState("");
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [voice, setVoice] = useState({
     ready: false,
     model: "",
@@ -95,7 +93,7 @@ export default function App() {
   const [captureMode, setCaptureMode] = useState<"new" | "refine">("new");
   const captureTarget = useRef<Conversation | null>(null);
   const captureStarting = useRef(false);
-  const historyDialog = useRef<HTMLDialogElement>(null);
+  const historyAction = useRef<(action: HistoryAction) => void>(() => {});
   const recorder = useRef<VoiceRecorder | null>(null),
     activeRequest = useRef("");
   const recordingStart = useRef(0),
@@ -157,10 +155,22 @@ export default function App() {
             throw new Error(
               "Incompatible history. The original file was preserved.",
             );
+          const fresh = newConversation();
           setWorkspace({
             ...stored,
-            conversations: stored.conversations.length
-              ? stored.conversations.map((c: Conversation) => ({
+            selected: fresh.id,
+            conversations: [
+              fresh,
+              ...stored.conversations
+                .filter(
+                  (c: Conversation) =>
+                    c.source ||
+                    c.output ||
+                    c.versions.length ||
+                    c.pending ||
+                    c.recovery,
+                )
+                .map((c: Conversation) => ({
                   ...c,
                   title:
                     c.title === "Nova conversa" ? "New conversation" : c.title,
@@ -174,8 +184,8 @@ export default function App() {
                         },
                       }
                     : undefined,
-                }))
-              : [initial],
+                })),
+            ],
             config: {
               ...defaults,
               ...stored.config,
@@ -712,7 +722,6 @@ export default function App() {
   }
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (historyDialog.current?.open) return;
       if (e.ctrlKey && e.shiftKey && e.code === "Space") {
         e.preventDefault();
         void toggleRecording();
@@ -737,20 +746,8 @@ export default function App() {
       selected: c.id,
       conversations: [c, ...w.conversations],
     }));
-    historyDialog.current?.close();
     setError("");
     setRetry(false);
-  }
-  function removeConversation() {
-    if (conversation.recovery)
-      completedAudio.current.add(conversation.recovery.id);
-    setRetry(false);
-    setError("");
-    setWorkspace((w) => {
-      const remaining = w.conversations.filter((c) => c.id !== conversation.id);
-      if (!remaining.length) remaining.push(newConversation());
-      return { ...w, conversations: remaining, selected: remaining[0].id };
-    });
   }
   async function openDocument() {
     try {
@@ -774,9 +771,105 @@ export default function App() {
       setError(readable(e));
     }
   }
-  const filtered = workspace.conversations.filter((c) =>
-    `${c.title} ${c.source}`.toLowerCase().includes(query.toLowerCase()),
-  );
+  function historySnapshot(): HistorySnapshot {
+    return {
+      selected: conversation.id,
+      locked: busy || recording || starting || !loaded,
+      conversations: workspace.conversations
+        .filter(
+          (c) =>
+            c.source ||
+            c.output ||
+            c.versions.length ||
+            c.pending ||
+            c.recovery,
+        )
+        .map((c) => ({
+          id: c.id,
+          title: c.title,
+          updated: c.updated,
+          searchText: c.source,
+        })),
+    };
+  }
+  async function openHistory() {
+    try {
+      if (desktop)
+        await invoke("sync_history", { data: historySnapshot(), show: true });
+      else {
+        localStorage.setItem(
+          "voice-prompt-history-preview",
+          JSON.stringify(historySnapshot()),
+        );
+        window.open(
+          "/#history",
+          "voice-prompt-history",
+          "width=380,height=480",
+        );
+      }
+    } catch (e) {
+      setError(readable(e));
+    }
+  }
+  historyAction.current = (action) => {
+    if (busyRef.current || recording || starting || !loaded) return;
+    if (action.action === "new") addConversation();
+    else if (action.action === "select") {
+      if (!workspace.conversations.some((c) => c.id === action.id)) return;
+      setWorkspace((w) => ({ ...w, selected: action.id }));
+      setError("");
+      setRetry(false);
+    } else if (action.action === "delete") {
+      const item = workspace.conversations.find((c) => c.id === action.id);
+      if (!item) return;
+      if (item.recovery) completedAudio.current.add(item.recovery.id);
+      setWorkspace((w) => {
+        const remaining = w.conversations.filter((c) => c.id !== action.id);
+        const next = remaining.length ? remaining : [newConversation()];
+        return {
+          ...w,
+          conversations: next,
+          selected: w.selected === action.id ? next[0].id : w.selected,
+        };
+      });
+      setError("");
+      setRetry(false);
+    }
+  };
+  useEffect(() => {
+    if (!desktop || !loaded) return;
+    void invoke("sync_history", { data: historySnapshot(), show: false }).catch(
+      (e) => setError(readable(e)),
+    );
+  }, [workspace, loaded, busy, recording, starting]);
+  useEffect(() => {
+    if (!desktop) {
+      const onMessage = (event: MessageEvent) => {
+        if (
+          event.origin === window.location.origin &&
+          event.data?.type === "history-action"
+        )
+          historyAction.current(event.data.action);
+      };
+      window.addEventListener("message", onMessage);
+      return () => window.removeEventListener("message", onMessage);
+    }
+    let disposed = false;
+    let off: (() => void) | undefined;
+    void getCurrentWindow()
+      .listen<HistoryAction>("history-action", ({ payload }) =>
+        historyAction.current(payload),
+      )
+      .then((fn) => {
+        if (disposed) fn();
+        else off = fn;
+      })
+      .catch((e) => setError(readable(e)));
+    return () => {
+      disposed = true;
+      off?.();
+    };
+  }, []);
   return (
     <div className="tool-shell">
       <header className="toolbar">
@@ -805,10 +898,7 @@ export default function App() {
             title="History"
             aria-label="History"
             disabled={locked}
-            onClick={() => {
-              setQuery("");
-              historyDialog.current?.showModal();
-            }}
+            onClick={() => void openHistory()}
           >
             <History size={17} />
           </button>
@@ -838,6 +928,7 @@ export default function App() {
           <button
             className="icon-button"
             aria-label="Dismiss message"
+            title="Dismiss message"
             onClick={() => {
               setError("");
               setNotice("");
@@ -872,7 +963,11 @@ export default function App() {
                 aria-label={
                   recording ? "Finish recording" : "Record new prompt"
                 }
-                title="Ctrl+Shift+Space"
+                title={
+                  recording
+                    ? "Finish recording (Ctrl+Shift+Space)"
+                    : "Record a new prompt (Ctrl+Shift+Space)"
+                }
                 disabled={busy || starting || !loaded}
                 onClick={() => void toggleRecording()}
               >
@@ -934,12 +1029,14 @@ export default function App() {
             <div className="prompt-actions">
               <button
                 className="primary open-prompt"
+                title="Open the prompt as Markdown"
                 onClick={() => void openDocument()}
               >
                 <FileText size={16} /> Open prompt
               </button>
               <button
                 className="secondary"
+                title="Copy the prompt as raw Markdown"
                 onClick={() => {
                   void navigator.clipboard
                     .writeText(completedContext(conversation))
@@ -955,68 +1052,6 @@ export default function App() {
           )}
         </main>
       )}
-      <dialog
-        ref={historyDialog}
-        className="history-dialog"
-        aria-labelledby="history-title"
-      >
-        <header className="dialog-header">
-          <h2 id="history-title">History</h2>
-          <button
-            className="icon-button"
-            aria-label="Close history"
-            onClick={() => historyDialog.current?.close()}
-          >
-            <X size={17} />
-          </button>
-        </header>
-        <input
-          className="history-search"
-          aria-label="Search conversations"
-          placeholder="Search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <nav aria-label="Conversations" className="history-list">
-          {filtered.map((c) => (
-            <button
-              className={c.id === conversation.id ? "active" : ""}
-              key={c.id}
-              onClick={() => {
-                setWorkspace((w) => ({ ...w, selected: c.id }));
-                setError("");
-                setRetry(false);
-                historyDialog.current?.close();
-              }}
-            >
-              <span>
-                {c.title === "New conversation" && c.source
-                  ? c.source.slice(0, 42)
-                  : c.title}
-              </span>
-              <time>
-                {new Date(c.updated).toLocaleDateString("en-US", {
-                  day: "2-digit",
-                  month: "2-digit",
-                })}
-              </time>
-            </button>
-          ))}
-          {!filtered.length && (
-            <p className="setting-note">Nenhuma conversa.</p>
-          )}
-        </nav>
-        <footer className="dialog-footer">
-          <button className="text-button danger" onClick={removeConversation}>
-            <Trash2 size={14} />
-            Delete current
-          </button>
-          <button className="primary" onClick={addConversation}>
-            <Plus size={14} />
-            New
-          </button>
-        </footer>
-      </dialog>
     </div>
   );
 }

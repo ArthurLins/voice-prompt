@@ -119,6 +119,19 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+async function openExistingApp() {
+  render(<App />);
+  await waitFor(() =>
+    expect(
+      mock.invoke.mock.calls.some(([name]) => name === "sync_history"),
+    ).toBe(true),
+  );
+  await act(async () =>
+    mock.listeners["history-action"]({
+      payload: { action: "select", id: "a" },
+    }),
+  );
+}
 async function record(action = "Refine current prompt") {
   await waitFor(() =>
     expect(
@@ -136,7 +149,7 @@ async function record(action = "Refine current prompt") {
   await screen.findByText("Preparing your prompt");
 }
 test("refinement stays explicit and the prompt is only passed to its separate window", async () => {
-  render(<App />);
+  await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
   expect(screen.queryByText("private raw dictation")).toBeNull();
   expect(screen.queryByRole("textbox", { name: "Entrada" })).toBeNull();
@@ -157,7 +170,7 @@ test("refinement stays explicit and the prompt is only passed to its separate wi
   );
 });
 test("failed generation preserves the completed result and can retry without recording again", async () => {
-  render(<App />);
+  await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
   await record();
   await act(async () => rejectRequest(new Error("Connection interrupted")));
@@ -171,7 +184,7 @@ test("failed generation preserves the completed result and can retry without rec
   await act(async () => resolveRequest(generated));
 });
 test("new conversation clears implicit context", async () => {
-  render(<App />);
+  await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
   await record("Record new prompt");
   expect(request.previous).toBe("");
@@ -191,7 +204,7 @@ test("legacy interrupted output is excluded from context", () => {
 });
 
 test("settings opens outside the main interface and minimizing uses the native command", async () => {
-  render(<App />);
+  await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   await waitFor(() =>
@@ -205,7 +218,7 @@ test("settings opens outside the main interface and minimizing uses the native c
   expect(mock.top).toHaveBeenCalledWith(true);
 });
 test("saving settings preserves conversation and current pin preference", async () => {
-  render(<App />);
+  await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
   await act(async () =>
     mock.listeners["settings-save"]({
@@ -234,12 +247,11 @@ test("saving settings preserves conversation and current pin preference", async 
 
 test("first prompt starts recording in one click and refinement appears only after completion", async () => {
   render(<App />);
-  await screen.findByRole("button", { name: "Open prompt" });
-  fireEvent.click(screen.getByRole("button", { name: "History" }));
-  const confirmation = vi.spyOn(window, "confirm");
-  fireEvent.click(screen.getByRole("button", { name: "Delete current" }));
-  expect(confirmation).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Close history" }));
+  await waitFor(() =>
+    expect(
+      mock.invoke.mock.calls.some(([name]) => name === "sync_history"),
+    ).toBe(true),
+  );
   expect(
     screen.queryByRole("button", { name: "Refine current prompt" }),
   ).toBeNull();
@@ -253,10 +265,9 @@ test("first prompt starts recording in one click and refinement appears only aft
   expect(
     screen.getByRole("button", { name: "Record new prompt" }),
   ).toBeTruthy();
-  confirmation.mockRestore();
 });
 test("discarding a new recording keeps the current prompt available", async () => {
-  render(<App />);
+  await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
   fireEvent.click(screen.getByRole("button", { name: "Record new prompt" }));
   await screen.findByRole("button", { name: "Finish recording" });
@@ -271,7 +282,7 @@ test("discarding a new recording keeps the current prompt available", async () =
 });
 
 test("main remains topmost and copies the completed Markdown without opening a document", async () => {
-  render(<App />);
+  await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
   expect(mock.top).toHaveBeenCalledWith(true);
   expect(screen.queryByRole("button", { name: "Always on top" })).toBeNull();
@@ -328,7 +339,7 @@ async function answer(action: string, answers: string[]) {
   );
 }
 test("questions are external, Portuguese answers stay intact, subsequent rounds lead to final output", async () => {
-  render(<App />);
+  await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
   await enableQuestions();
   await record();
@@ -370,7 +381,7 @@ test("questions are external, Portuguese answers stay intact, subsequent rounds 
   await waitFor(() => expect(mock.copy).toHaveBeenCalledWith(generated));
 });
 test("question mode remains optional and clear requests can finish directly", async () => {
-  render(<App />);
+  await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
   await record();
   expect(request.settings.askQuestions).toBe(false);
@@ -382,7 +393,7 @@ test("question mode remains optional and clear requests can finish directly", as
   expect(screen.queryByRole("button", { name: "Open questions" })).toBeNull();
 });
 test("pending answers persist and stale question-window events are ignored", async () => {
-  render(<App />);
+  await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
   await enableQuestions();
   await record();
@@ -432,7 +443,7 @@ test("transcription failure retries the saved audio and never reuses an old refi
     }
     return originalInvoke(name, args);
   });
-  render(<App />);
+  await openExistingApp();
   await screen.findByRole("button", { name: "Open prompt" });
   fireEvent.click(
     screen.getByRole("button", { name: "Refine current prompt" }),
@@ -473,7 +484,7 @@ test("a saved interrupted recording can resume after reopening", async () => {
     }
     return originalInvoke(name, args);
   });
-  render(<App />);
+  await openExistingApp();
   fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
   await waitFor(() => expect(requests).toHaveLength(1));
   expect(requests[0].audioId).toBe("saved-recording");
@@ -481,4 +492,59 @@ test("a saved interrupted recording can resume after reopening", async () => {
   expect(
     mock.invoke.mock.calls.some(([name]) => name === "save_recording"),
   ).toBe(false);
+});
+
+test("startup always selects a fresh conversation while preserving history and recovery", async () => {
+  render(<App />);
+  await waitFor(() =>
+    expect(
+      mock.invoke.mock.calls.some(([name]) => name === "sync_history"),
+    ).toBe(true),
+  );
+  expect(screen.queryByRole("button", { name: "Open prompt" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Refine current prompt" }),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "History" }));
+  await waitFor(() =>
+    expect(mock.invoke).toHaveBeenCalledWith("sync_history", {
+      show: true,
+      data: expect.objectContaining({
+        selected: expect.not.stringMatching(/^a$/),
+        conversations: expect.arrayContaining([
+          expect.objectContaining({ id: "a", title: "Existing" }),
+        ]),
+      }),
+    }),
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  for (const label of [
+    "History",
+    "Settings",
+    "Close app",
+    "Record new prompt",
+  ]) {
+    expect(
+      screen.getByRole("button", { name: label }).getAttribute("title"),
+    ).toBeTruthy();
+  }
+});
+
+test("history deletion uses the separate window event and never a browser confirmation", async () => {
+  await openExistingApp();
+  const confirm = vi.spyOn(window, "confirm");
+  await act(async () =>
+    mock.listeners["history-action"]({
+      payload: { action: "delete", id: "a" },
+    }),
+  );
+  expect(confirm).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Open prompt" })).toBeNull();
+  await waitFor(() =>
+    expect(mock.invoke).toHaveBeenCalledWith("sync_history", {
+      show: false,
+      data: expect.objectContaining({ conversations: [] }),
+    }),
+  );
+  confirm.mockRestore();
 });
