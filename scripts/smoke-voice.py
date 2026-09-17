@@ -17,10 +17,12 @@ parser.add_argument('audio')
 parser.add_argument('language', nargs='?', default='pt')
 parser.add_argument('--gpu', action='store_true')
 parser.add_argument('--model', choices=['small', 'large-v3-turbo-q5_0'])
+parser.add_argument('--expect', help='Fail if the transcription does not contain this text')
 args = parser.parse_args()
-model = json.loads((runtime / 'model.json').read_text(encoding='utf-8-sig'))['file']
 if args.model:
     model = f'ggml-{args.model}.bin'
+else:
+    model = json.loads((runtime / 'model.json').read_text(encoding='utf-8-sig'))['file']
 audio = pathlib.Path(args.audio).read_bytes()
 language = args.language
 with socket.socket() as listener:
@@ -31,7 +33,8 @@ url = f'http://127.0.0.1:{port}{route}'
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 started = time.perf_counter()
 with open(root / 'test-results' / ('whisper-smoke-gpu.log' if args.gpu else 'whisper-smoke.log'), 'w') as log:
-    process = subprocess.Popen([str(runtime / ('vulkan/whisper-server.exe' if args.gpu else 'whisper-server.exe')), '-m', str(runtime / model), '--host', '127.0.0.1', '--port', str(port), '--request-path', route, '-nt', '-t', '8'] + ([] if args.gpu else ['-ng']), cwd=(runtime / 'vulkan' if args.gpu else runtime), stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
+    server = runtime / (('vulkan/whisper-server.exe' if args.gpu else 'whisper-server.exe') if sys.platform == 'win32' else 'whisper-server')
+    process = subprocess.Popen([str(server), '-m', str(runtime / model), '--host', '127.0.0.1', '--port', str(port), '--request-path', route, '-nt', '-t', '8'] + ([] if args.gpu else ['-ng']), cwd=server.parent, stdout=log, stderr=log, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     try:
         for _ in range(180):
             if process.poll() is not None:
@@ -55,6 +58,8 @@ with open(root / 'test-results' / ('whisper-smoke-gpu.log' if args.gpu else 'whi
             with opener.open(request, timeout=300) as response:
                 result = json.load(response)
             assert result.get('text', '').strip(), result
+            if args.expect and args.expect.casefold() not in result['text'].casefold():
+                raise AssertionError(f'Expected {args.expect!r} in transcription: {result}')
             print(json.dumps({'attempt': attempt + 1, 'seconds': round(time.perf_counter() - started, 2), 'text': result['text']}, ensure_ascii=False), flush=True)
     finally:
         process.terminate()

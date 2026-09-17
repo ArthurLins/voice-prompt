@@ -1,0 +1,74 @@
+name: Build macOS Apple Silicon
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/macos-support]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Prepare native Apple Silicon toolchain
+        run: |
+          test "$(uname -m)" = arm64
+          rustup toolchain install stable --profile minimal --target aarch64-apple-darwin
+          rustup default stable
+          cmake --version
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Build verified Metal speech runtime
+        run: bash scripts/setup-macos.sh
+      - name: Test native backend
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Test real local transcription on CPU
+        run: |
+          curl --fail --location --retry 3 --silent --show-error \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin \
+            -o src-tauri/runtime/ggml-small.bin
+          echo '1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b  src-tauri/runtime/ggml-small.bin' | shasum -a 256 -c -
+          python3 scripts/smoke-voice.py test-results/jfk.wav en --model small --expect 'ask not'
+      - name: Build ad-hoc signed application and DMG
+        run: npm run package -- --ci --target aarch64-apple-darwin -- --locked
+      - name: Verify installed bundle and package artifacts
+        run: |
+          app='src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Voice Prompt.app'
+          codesign --verify --deep --strict "$app"
+          test "$(lipo -archs "$app/Contents/MacOS/voice-prompt")" = arm64
+          test "$(lipo -archs "$app/Contents/Resources/runtime/whisper-server")" = arm64
+          /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$app/Contents/Info.plist"
+          "$app/Contents/Resources/runtime/whisper-server" --help
+          mkdir -p release-assets
+          cp src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg release-assets/
+          (cd release-assets && shasum -a 256 *.dmg > SHA256SUMS.txt)
+      - name: Upload installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Voice-Prompt-macOS-Apple-Silicon
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macOS-speech-logs
+          path: test-results/*.log

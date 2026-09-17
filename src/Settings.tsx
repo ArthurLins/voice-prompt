@@ -423,7 +423,7 @@ export default function Settings(props: Props) {
                   onChange={(e) => props.setApiKey(e.target.value)}
                   placeholder={
                     props.keySaved
-                      ? "Saved in Windows; leave blank to keep"
+                      ? "Saved securely on this device; leave blank to keep"
                       : "OpenRouter key"
                   }
                 />
@@ -438,7 +438,8 @@ export default function Settings(props: Props) {
                 </button>
               )}
               <p className="setting-note">
-                Only text is sent to the provider. The key stays in Windows.
+                Only text is sent to the provider. The key stays in your system's
+                secure credential store.
               </p>
             </>
           )}

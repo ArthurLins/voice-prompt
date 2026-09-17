@@ -1,10 +1,10 @@
 # Voice Prompt
 
-A compact Windows assistant built with Tauri 2, Rust and React. Record a request, transcribe it locally, refine it with the configured OpenRouter model, and copy the final prompt.
+A compact Windows and macOS (Apple Silicon) assistant built with Tauri 2, Rust and React. Record a request, transcribe it locally, refine it with the configured OpenRouter model, and copy the final prompt. See [macOS setup and distribution](docs/MACOS.md) for the Apple Silicon build and validation requirements.
 
 ## Version 0.7.2
 
-- The main window is compact at 280 × 260, expanding to 420 × 520 during clarification. Icon controls retain hover descriptions and accessible names. Every startup selects a fresh conversation; previous prompts, unfinished recordings and pending questions remain available only through History.
+- The main window is compact at 240 × 224, expanding to 420 × 520 during clarification. Icon controls retain hover descriptions and accessible names. Every startup selects a fresh conversation; previous prompts, unfinished recordings and pending questions remain available only through History.
 - **Settings → Prompts → Always on top** controls whether the main window stays above other applications. The preference survives restarts. Minimize remains available; switching applications does not steal keyboard focus back.
 - Prompt actions are icon-only with tooltips and accessible names. **Copy** copies raw Markdown; **Open prompt** uses an external-window icon to open the rendered document. App chrome is non-selectable; editable fields and the prompt document retain text selection.
 - **Settings → Connection → Thinking effort** controls reasoning effort. **Model default** preserves existing request behavior. Explicit levels depend on the model/provider; OpenRouter uses `reasoning.effort`, while other OpenAI-compatible endpoints use `reasoning_effort`.

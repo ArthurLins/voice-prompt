@@ -11,6 +11,7 @@
     "package": "tauri build",
     "test": "vitest run src",
     "setup:vulkan": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-vulkan.ps1",
+    "setup:macos": "bash scripts/setup-macos.sh",
     "setup:voice": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-voice.ps1"
   },
   "dependencies": {

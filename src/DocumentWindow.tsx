@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { commandKey } from "./platform";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Check, Copy, FileText, CircleAlert } from "lucide-react";
@@ -49,7 +50,7 @@ export default function DocumentWindow() {
       setError("");
     } catch {
       setCopied(false);
-      setError("Could not copy. Select the text and press Ctrl+C.");
+      setError(`Could not copy. Select the text and press ${commandKey()}+C.`);
     }
   }
   return (

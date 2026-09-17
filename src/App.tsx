@@ -30,6 +30,7 @@ import { emitTo } from "@tauri-apps/api/event";
 import { completedContext } from "./conversation";
 import { normalizePromptConfig, validatePromptConfig } from "./prompts";
 import { MAX_RECORDING_SECONDS, VoiceRecorder } from "./audio";
+import { commandKey, commandPressed } from "./platform";
 
 type Version = { id: string; source: string; output: string; date: string };
 type Conversation = {
@@ -760,12 +761,12 @@ export default function App() {
   }
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.code === "Space") {
+      if (commandPressed(e) && e.shiftKey && e.code === "Space") {
         e.preventDefault();
         void toggleRecording();
       }
       if (
-        e.ctrlKey &&
+        commandPressed(e) &&
         e.key === "Enter" &&
         !locked &&
         (retry || conversation.recovery)
@@ -1011,8 +1012,8 @@ export default function App() {
                   error ||
                   notice ||
                   (recording
-                    ? "Finish recording (Ctrl+Shift+Space)"
-                    : "Record a new prompt (Ctrl+Shift+Space)")
+                    ? `Finish recording (${commandKey()}+Shift+Space)`
+                    : `Record a new prompt (${commandKey()}+Shift+Space)`)
                 }
                 disabled={busy || starting || !loaded}
                 onClick={() => void toggleRecording()}

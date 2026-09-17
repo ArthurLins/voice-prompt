@@ -4,6 +4,7 @@ use base64::Engine as _;
 use eventsource_stream::Eventsource;
 mod clarification;
 mod models;
+mod platform;
 mod prompts;
 mod recordings;
 mod streaming;
@@ -114,7 +115,7 @@ fn api_url(base: &str, suffix: &str) -> Result<String, String> {
 fn credential(base: &str) -> Result<keyring::Entry, String> {
     let normalized = api_url(base, "")?;
     keyring::Entry::new("VoicePrompt", &normalized)
-        .map_err(|_| "Could not access Windows Credential Manager.".into())
+        .map_err(|_| "Could not access the system credential store.".into())
 }
 #[tauri::command]
 fn save_key(base_url: String, key: String) -> Result<(), String> {
@@ -127,7 +128,7 @@ fn save_key(base_url: String, key: String) -> Result<(), String> {
     } else {
         entry
             .set_password(key.trim())
-            .map_err(|_| "Could not save the key in Windows Credential Manager.".into())
+            .map_err(|_| "Could not save the key in the system credential store.".into())
     }
 }
 #[tauri::command]
@@ -135,7 +136,7 @@ fn has_key(base_url: String) -> Result<bool, String> {
     match credential(&base_url)?.get_password() {
         Ok(_) => Ok(true),
         Err(keyring::Error::NoEntry) => Ok(false),
-        Err(_) => Err("Could not read Windows Credential Manager.".into()),
+        Err(_) => Err("Could not read the system credential store.".into()),
     }
 }
 fn data_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -190,9 +191,9 @@ async fn voice_status(app: tauri::AppHandle, state: State<'_, AppState>) -> Resu
     let installed = models::installed(&dir).await;
     let runtime = runtime_dir(&app)?;
     Ok(
-        json!({"ready": runtime.join("whisper-server.exe").exists() && !installed.is_empty(),
+        json!({"ready": platform::speech_server(&runtime, false).is_file() && !installed.is_empty(),
         "model": installed.first(), "models": installed,
-        "backend": if runtime.join("vulkan/whisper-server.exe").exists() { "Vulkan / CPU fallback" } else { "CPU" }}),
+        "backend": platform::backend(&runtime)}),
     )
 }
 async fn ensure_engine(
@@ -249,11 +250,7 @@ async fn ensure_engine_at(
             "Model {selected} is not installed. Download it in Settings / Audio."
         ));
     }
-    let loader_available = std::env::var_os("SystemRoot")
-        .is_some_and(|root| PathBuf::from(root).join("System32/vulkan-1.dll").exists());
-    if loader_available
-        && dir.join("vulkan/whisper-server.exe").exists()
-        && !state.gpu_failed.load(std::sync::atomic::Ordering::Relaxed)
+    if platform::gpu_available(dir) && !state.gpu_failed.load(std::sync::atomic::Ordering::Relaxed)
     {
         match start_engine(&dir, model_path, &model, true).await {
             Ok(engine) => {
@@ -284,34 +281,27 @@ async fn start_engine(
     let threads = std::thread::available_parallelism()
         .map(|n| n.get().saturating_sub(2).clamp(1, 8))
         .unwrap_or(4);
-    let mut cmd = Command::new(dir.join(if gpu {
-        "vulkan/whisper-server.exe"
-    } else {
-        "whisper-server.exe"
-    }));
-    cmd.current_dir(if gpu {
-        dir.join("vulkan")
-    } else {
-        dir.to_path_buf()
-    })
-    .args([
-        "--host",
-        "127.0.0.1",
-        "--port",
-        &port.to_string(),
-        "--request-path",
-        &route,
-        "-m",
-        &model_path.to_string_lossy(),
-        "-t",
-        &threads.to_string(),
-        "-nt",
-        "-l",
-        "pt",
-    ])
-    .stdin(Stdio::null())
-    .stdout(Stdio::null())
-    .stderr(Stdio::null());
+    let server = platform::speech_server(dir, gpu);
+    let mut cmd = Command::new(&server);
+    cmd.current_dir(server.parent().unwrap_or(dir))
+        .args([
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+            "--request-path",
+            &route,
+            "-m",
+            &model_path.to_string_lossy(),
+            "-t",
+            &threads.to_string(),
+            "-nt",
+            "-l",
+            "pt",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     if !gpu {
         cmd.arg("-ng");
     }

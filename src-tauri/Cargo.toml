@@ -17,10 +17,16 @@ tokio = { version = "1", features = ["process", "time", "sync", "fs", "macros"] 
 tokio-util = "0.7"
 futures-util = "0.3"
 eventsource-stream = "0.2"
-keyring = { version = "3", features = ["windows-native"] }
 base64 = "0.22"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+tauri = { version = "2", features = ["macos-private-api"] }
 
 [profile.release]
 strip = true
