@@ -13,7 +13,7 @@ A compact Windows assistant built with Tauri 2, Rust and React. Record a request
 
 ## Run
 
-To publish an installer, run **Actions → Release Windows → Run workflow** on `main`. The workflow tests, builds and publishes the version declared in the project. See [RELEASING.md](docs/RELEASING.md) for version updates, artifacts and failure recovery.
+To publish an installer ZIP, run **Actions → Release Windows → Run workflow** on `main`. The workflow tests, builds and publishes the version declared in the project. Download the ZIP from Releases, extract it, and run the installer inside. See [RELEASING.md](docs/RELEASING.md) for version updates, artifacts and failure recovery.
 
 After a local release build, the installer is written to `src-tauri/target/release/bundle/nsis/Voice Prompt_0.7.0_x64-setup.exe`. Binaries and speech models are not included in the Git repository.
 Executable: `src-tauri/target/release/voice-prompt.exe`.

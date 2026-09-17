@@ -83,7 +83,7 @@ jobs:
       - name: Build NSIS installer
         run: npm run package -- --ci -- --locked
 
-      - name: Prepare installer and checksums
+      - name: Package installer ZIP and checksums
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -91,9 +91,11 @@ jobs:
           $installer = "src-tauri/target/release/bundle/nsis/Voice Prompt_$($env:RELEASE_VERSION)_x64-setup.exe"
           if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Installer not found: $installer" }
           New-Item -ItemType Directory -Path release-assets | Out-Null
-          Copy-Item -LiteralPath $installer -Destination release-assets
-          $name = Split-Path -Leaf $installer
-          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          $zip = "release-assets/Voice Prompt_$($env:RELEASE_VERSION)_x64-setup.zip"
+          # NSIS already compresses the installer; avoid compressing it a second time.
+          Compress-Archive -LiteralPath $installer -DestinationPath $zip -CompressionLevel NoCompression
+          $name = Split-Path -Leaf $zip
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $name" | Set-Content -Encoding utf8NoBOM release-assets/SHA256SUMS.txt
 
       - name: Upload verified build artifacts
@@ -131,11 +133,11 @@ jobs:
           cd release-assets
           sha256sum --check SHA256SUMS.txt
           tag="v${RELEASE_VERSION}"
-          installer="Voice Prompt_${RELEASE_VERSION}_x64-setup.exe"
+          installer="Voice Prompt_${RELEASE_VERSION}_x64-setup.zip"
           cat > release-notes.md <<'NOTES'
           Windows x64 installer with local CPU speech processing and both Whisper models included.
 
-          Download the `x64-setup.exe` asset to install. `SHA256SUMS.txt` contains its checksum.
+          Download the `x64-setup.zip` asset, extract it, and run the installer inside. `SHA256SUMS.txt` contains the ZIP checksum.
           This installer is not code-signed. Close an older running instance before installing.
           No API credentials are included; configure your own provider key in Settings.
           NOTES
