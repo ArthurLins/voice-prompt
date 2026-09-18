@@ -2,7 +2,7 @@
 
 A compact Windows and macOS (Apple Silicon) assistant built with Tauri 2, Rust and React. Record a request, transcribe it locally, refine it with the configured OpenRouter model, and copy the final prompt. See [macOS setup and distribution](docs/MACOS.md) for the Apple Silicon build and validation requirements.
 
-## Version 1.0.0
+## Version 1.0.1
 
 - The main window is compact at 240 × 224, expanding to 420 × 520 during clarification. Icon controls retain hover descriptions and accessible names. Every startup selects a fresh conversation; previous prompts, unfinished recordings and pending questions remain available only through History.
 - **Settings → Prompts → Always on top** controls whether the main window stays above other applications. The preference survives restarts. Minimize remains available; switching applications does not steal keyboard focus back.
@@ -17,7 +17,7 @@ A compact Windows and macOS (Apple Silicon) assistant built with Tauri 2, Rust a
 
 Push a version tag such as `v1.0.0` to publish a release. **Release Windows and macOS** verifies that the tag matches every manifest, builds both platforms, and publishes the Windows x64 `.exe`, Apple Silicon `.dmg`, and SHA-256 checksums together. See [RELEASING.md](docs/RELEASING.md) for the commands and failure recovery.
 
-After a local Windows release build, the installer is written to `src-tauri/target/release/bundle/nsis/Voice Prompt_1.0.0_x64-setup.exe`. Binaries and speech models are not included in the Git repository.
+After a local Windows release build, the installer is written to `src-tauri/target/release/bundle/nsis/Voice Prompt_1.0.1_x64-setup.exe`. Binaries and speech models are not included in the Git repository.
 Executable: `src-tauri/target/release/voice-prompt.exe`.
 
 Close any older instance before opening the new version: they share history and credentials. The standalone executable requires its `runtime` folder beside it. The installer contains the speech runtime only. On first launch, choose a model and follow the download progress; the main screen opens after verification and speech-engine readiness. Settings → Audio can download either model or delete one while keeping at least one installed. Model changes apply immediately.
@@ -33,6 +33,8 @@ Enable **Settings → Prompts → Clarify uncertainties before generating** to u
 Settings remain in a separate window with custom scrolling. History remains in the main window and deletes the selected conversation directly. Profiles, output language, tone and editor rules remain editable in Settings → Prompts. Settings → Audio selects the microphone, transcription language and local model. Settings → Connection configures the API URL, model and key.
 
 ## Processing and storage
+
+Settings → Connection → Authentication method defaults to **OpenAI Protocol (API key)**, including for existing settings. API URL, model and secure key storage retain their existing behavior. **ChatGPT login (OAuth)** uses the official [Codex App Server](https://learn.chatgpt.com/docs/app-server) for both login and generation. See [ChatGPT connection setup](docs/CHATGPT.md).
 
 - Speech uses whisper.cpp v1.9.2 with `small` and `large-v3-turbo-q5_0`. Models are downloaded from the whisper.cpp model repository on Hugging Face over HTTPS, with fixed SHA-256 digests and expected sizes compiled into the Rust application. Files are verified before installation and before loading into the speech engine. Release builds include Vulkan acceleration for compatible AMD/NVIDIA/Intel GPUs and a separate CPU fallback. No CUDA, NVIDIA SDK or Vulkan SDK is required to run the installed app; GPU support depends on the graphics driver. DirectML is not used.
 - Audio stays local. A resident process handles WAV PCM mono, 16 kHz, 16-bit audio over loopback with a dynamic port and random route. Readiness uses `/health`. Recordings support up to 30 minutes and stop automatically at that limit. Transcription processes pause-aware chunks of at most 60 seconds, preserving every sample in order and showing progress. Each completed chunk is checkpointed; retry resumes unfinished work.

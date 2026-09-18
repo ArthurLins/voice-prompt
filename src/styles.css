@@ -1324,3 +1324,27 @@ textarea,
   height: 6px;
   accent-color: #648873;
 }
+
+.chatgpt-connection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.chatgpt-connection .setting-note {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.chatgpt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chatgpt-actions button {
+  flex: 1 1 140px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 32px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

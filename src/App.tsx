@@ -17,6 +17,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { defaults, type Config } from "./config";
+import { validateAuthenticationMethod } from "./authentication";
 export type { Config } from "./config";
 import Clarification, {
   type QuestionResult,
@@ -413,7 +414,10 @@ export default function App() {
         async ({ payload }) => {
           let failure = "";
           try {
-            const validation = validatePromptConfig(payload.config);
+            const validation =
+              validateAuthenticationMethod(
+                payload.config.authenticationMethod,
+              ) || validatePromptConfig(payload.config);
             if (validation) throw new Error(validation);
             if (storageFailed)
               throw new Error(

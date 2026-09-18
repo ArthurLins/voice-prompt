@@ -4,6 +4,7 @@ import { emitTo } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Settings from "./Settings";
 import { defaults, type Config } from "./config";
+import { validateAuthenticationMethod } from "./authentication";
 import { normalizePromptConfig, validatePromptConfig } from "./prompts";
 
 export default function SettingsWindow() {
@@ -16,6 +17,8 @@ export default function SettingsWindow() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const savingRef = useRef(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const authBusyRef = useRef(false);
   const modelsBusyRef = useRef(false);
   const [modelsBusy, setModelsBusy] = useState(false);
   const ack = useRef<{
@@ -74,7 +77,7 @@ export default function SettingsWindow() {
     };
   }, []);
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isTauri() || draft.authenticationMethod === "chatgpt-oauth") return;
     let alive = true;
     setKeySaved(false);
     void invoke<boolean>("has_key", { baseUrl: draft.baseUrl })
@@ -85,7 +88,7 @@ export default function SettingsWindow() {
     return () => {
       alive = false;
     };
-  }, [draft.baseUrl]);
+  }, [draft.baseUrl, draft.authenticationMethod]);
   async function close() {
     if (savingRef.current || modelsBusyRef.current) return;
     setKey("");
@@ -93,13 +96,24 @@ export default function SettingsWindow() {
     else window.close();
   }
   async function save() {
-    if (savingRef.current || modelsBusyRef.current || !loaded) return;
-    const validation = validatePromptConfig(draft);
+    if (
+      savingRef.current ||
+      modelsBusyRef.current ||
+      authBusyRef.current ||
+      !loaded
+    )
+      return;
+    const validation =
+      validateAuthenticationMethod(draft.authenticationMethod) ||
+      validatePromptConfig(draft);
     if (validation) {
       setError(validation);
       return;
     }
-    if (!draft.baseUrl.trim() || !draft.model.trim()) {
+    if (
+      draft.authenticationMethod !== "chatgpt-oauth" &&
+      (!draft.baseUrl.trim() || !draft.model.trim())
+    ) {
       setError("Enter the API URL and model.");
       return;
     }
@@ -113,10 +127,12 @@ export default function SettingsWindow() {
         model: draft.model.trim(),
       };
       if (isTauri()) {
-        await invoke("has_key", { baseUrl: config.baseUrl });
-        if (key.trim()) {
-          await invoke("save_key", { baseUrl: config.baseUrl, key });
-          setKey("");
+        if (config.authenticationMethod !== "chatgpt-oauth") {
+          await invoke("has_key", { baseUrl: config.baseUrl });
+          if (key.trim()) {
+            await invoke("save_key", { baseUrl: config.baseUrl, key });
+            setKey("");
+          }
         }
         await new Promise<void>((resolve, reject) => {
           const id = crypto.randomUUID();
@@ -182,6 +198,11 @@ export default function SettingsWindow() {
             ? d
             : { ...d, voiceModel: status.models[0] ?? "small" },
         );
+      }}
+      authBusy={authBusy}
+      onAuthBusy={(busy) => {
+        authBusyRef.current = busy;
+        setAuthBusy(busy);
       }}
       desktop={isTauri()}
       apiKey={key}

@@ -1,5 +1,8 @@
 import { defaultPromptConfig, type PromptConfig } from "./prompts";
+import type { AuthenticationMethod } from "./authentication";
 export type Config = PromptConfig & {
+  authenticationMethod: AuthenticationMethod;
+  chatgptModel: string;
   baseUrl: string;
   model: string;
   thinkingEffort:
@@ -21,6 +24,8 @@ export type Config = PromptConfig & {
 };
 export const defaults: Config = {
   ...defaultPromptConfig(),
+  authenticationMethod: "openai-protocol",
+  chatgptModel: "",
   baseUrl: "https://openrouter.ai/api/v1",
   model: "openai/gpt-5.6-luna",
   thinkingEffort: "default",

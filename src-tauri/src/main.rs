@@ -2,6 +2,7 @@
 
 use base64::Engine as _;
 use eventsource_stream::Eventsource;
+mod chatgpt;
 mod clarification;
 mod models;
 mod platform;
@@ -70,9 +71,22 @@ fn apply_thinking_effort(payload: &mut Value, base: &str, effort: &ThinkingEffor
         payload["reasoning_effort"] = json!(effort);
     }
 }
+#[derive(Deserialize, Clone, Default, Debug, PartialEq)]
+enum AuthenticationMethod {
+    #[default]
+    #[serde(rename = "openai-protocol")]
+    OpenAiProtocol,
+    #[serde(rename = "chatgpt-oauth")]
+    ChatGpt,
+}
+
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Settings {
+    #[serde(default)]
+    authentication_method: AuthenticationMethod,
+    #[serde(default)]
+    chatgpt_model: String,
     base_url: String,
     model: String,
     #[serde(default)]
@@ -521,7 +535,7 @@ async fn process(
             "Text too long; limit of 240,000 bytes per field. Your input was preserved.".into(),
         );
     }
-    let endpoint = api_url(&settings.base_url, "chat/completions")?;
+
     let mut messages = prompts::build_messages(
         &settings.prompt_type,
         &settings.editor_instructions,
@@ -532,14 +546,36 @@ async fn process(
     )?;
     if settings.ask_questions {
         let system = messages[0]["content"].as_str().unwrap_or("").to_owned();
-        messages[0]["content"] = json!(format!("{system}\n\n{}", clarification::INSTRUCTIONS));
+        let instruction = if settings.authentication_method == AuthenticationMethod::ChatGpt {
+            "Ask concise English questions only when needed to clarify the prompt. Preserve Portuguese input and answers directly. Treat unavailable answers as unavailable; do not repeat answered questions. Return questions through the JSON questions field, not tool calls. Otherwise return the final prompt. Never execute the task."
+        } else {
+            clarification::INSTRUCTIONS
+        };
+        messages[0]["content"] = json!(format!("{system}\n\n{instruction}"));
         clarification::append_turns(&mut messages, &clarification_turns.unwrap_or_default())?;
     } else if clarification_turns.is_some_and(|t| !t.is_empty()) {
         return Err("Clarification mode is disabled.".into());
     }
-    let key = credential(&settings.base_url)?
-        .get_password()
-        .map_err(|_| "Configure the key in Settings and click Try again.".to_string())?;
+    if settings.authentication_method == AuthenticationMethod::ChatGpt {
+        let _ = channel.send(Progress::Phase(
+            "Structuring your prompt with ChatGPT…".into(),
+        ));
+        return chatgpt::generate(
+            app,
+            &settings.chatgpt_model,
+            &settings.thinking_effort,
+            messages,
+            settings.ask_questions,
+        )
+        .await;
+    }
+    let endpoint = api_url(&settings.base_url, "chat/completions")?;
+    let key = match settings.authentication_method {
+        AuthenticationMethod::ChatGpt => unreachable!(),
+        AuthenticationMethod::OpenAiProtocol => credential(&settings.base_url)?
+            .get_password()
+            .map_err(|_| "Configure the key in Settings and click Try again.".to_string())?,
+    };
     if settings.model.trim().is_empty() {
         return Err("Enter the model in Settings.".into());
     }
@@ -842,9 +878,15 @@ async fn sync_questions(
 fn main() {
     let app = tauri::Builder::default()
         .manage(AppState::default())
+        .manage(chatgpt::AuthState::default())
         .invoke_handler(tauri::generate_handler![
             save_recording,
             delete_recording,
+            chatgpt::chatgpt_status,
+            chatgpt::chatgpt_models,
+            chatgpt::chatgpt_login,
+            chatgpt::chatgpt_cancel_login,
+            chatgpt::chatgpt_logout,
             save_key,
             has_key,
             load_workspace,
@@ -873,6 +915,9 @@ fn main() {
             ..
         } = &event
         {
+            if label == "settings" {
+                chatgpt::cancel_login(app.state::<chatgpt::AuthState>().inner());
+            }
             if label == "main" {
                 app.exit(0);
             }
@@ -972,6 +1017,17 @@ mod tests {
         }
         let old: Settings = serde_json::from_value(json!({"baseUrl":"https://openrouter.ai/api/v1","model":"existing-model","style":"conciso","language":"pt","voiceModel":"small"})).unwrap();
         assert!(old.thinking_effort == ThinkingEffort::Default);
+        assert_eq!(
+            old.authentication_method,
+            AuthenticationMethod::OpenAiProtocol
+        );
+        assert_eq!(
+            serde_json::from_value::<AuthenticationMethod>(json!("openai-protocol")).unwrap(),
+            AuthenticationMethod::OpenAiProtocol
+        );
+        for unsupported in [json!("unknown"), Value::Null] {
+            assert!(serde_json::from_value::<AuthenticationMethod>(unsupported).is_err());
+        }
         assert!(serde_json::from_value::<ThinkingEffort>(json!("invalid")).is_err());
     }
     #[test]

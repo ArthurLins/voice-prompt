@@ -1,6 +1,7 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { Plus, RotateCcw, Trash2, X } from "lucide-react";
 import type { Config } from "./config";
+import ChatGptConnection from "./ChatGptConnection";
 import ModelManager, { type VoiceStatus } from "./ModelManager";
 import SettingsScroll from "./SettingsScroll";
 import WindowControls from "./WindowControls";
@@ -23,6 +24,8 @@ type Props = {
   keySaved: boolean;
   saving: boolean;
   loading?: boolean;
+  authBusy?: boolean;
+  onAuthBusy: (busy: boolean) => void;
   error: string;
   save: () => void;
   removeKey: () => void;
@@ -77,7 +80,7 @@ export default function Settings(props: Props) {
           }).map(([id, label]) => (
             <button
               type="button"
-              disabled={props.modelsBusy}
+              disabled={props.modelsBusy || props.authBusy}
               role="tab"
               id={`settings-tab-${id}`}
               aria-controls="settings-content"
@@ -370,25 +373,66 @@ export default function Settings(props: Props) {
           {tab === "api" && (
             <>
               <label>
-                API URL
-                <input
-                  type="url"
-                  value={draft.baseUrl}
+                Authentication method
+                <select
+                  value={draft.authenticationMethod ?? "openai-protocol"}
+                  aria-describedby="authentication-note"
+                  disabled={props.saving || props.loading || props.authBusy}
                   onChange={(e) => {
-                    setDraft({ ...draft, baseUrl: e.target.value });
-                    props.setApiKey("");
+                    if (
+                      e.target.value === "openai-protocol" ||
+                      e.target.value === "chatgpt-oauth"
+                    )
+                      setDraft({
+                        ...draft,
+                        authenticationMethod: e.target.value,
+                      });
                   }}
-                />
+                >
+                  <option value="openai-protocol">
+                    OpenAI Protocol (API key)
+                  </option>
+                  <option value="chatgpt-oauth">ChatGPT login (OAuth)</option>
+                </select>
               </label>
-              <label>
-                Model
-                <input
-                  value={draft.model}
-                  onChange={(e) =>
-                    setDraft({ ...draft, model: e.target.value })
-                  }
-                />
-              </label>
+              <p id="authentication-note" className="setting-note">
+                Choose an API key or sign in with your ChatGPT account.
+              </p>
+              {draft.authenticationMethod === "chatgpt-oauth" ? (
+                <>
+                  <ChatGptConnection
+                    desktop={props.desktop}
+                    onBusy={props.onAuthBusy}
+                    model={draft.chatgptModel ?? ""}
+                    onModelChange={(chatgptModel) =>
+                      setDraft((d) => ({ ...d, chatgptModel }))
+                    }
+                  />
+                </>
+              ) : (
+                <>
+                  <label>
+                    API URL
+                    <input
+                      type="url"
+                      value={draft.baseUrl}
+                      onChange={(e) => {
+                        setDraft({ ...draft, baseUrl: e.target.value });
+                        props.setApiKey("");
+                      }}
+                    />
+                  </label>
+                  <label>
+                    Model
+                    <input
+                      value={draft.model}
+                      onChange={(e) =>
+                        setDraft({ ...draft, model: e.target.value })
+                      }
+                    />
+                  </label>
+                </>
+              )}
               <label>
                 Thinking effort
                 <select
@@ -414,33 +458,37 @@ export default function Settings(props: Props) {
               <p className="setting-note">
                 Supported effort levels depend on the model and provider.
               </p>
-              <label>
-                API key
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={props.apiKey}
-                  onChange={(e) => props.setApiKey(e.target.value)}
-                  placeholder={
-                    props.keySaved
-                      ? "Saved securely on this device; leave blank to keep"
-                      : "OpenRouter key"
-                  }
-                />
-              </label>
-              {props.keySaved && (
-                <button
-                  type="button"
-                  className="text-button danger"
-                  onClick={props.removeKey}
-                >
-                  Remove saved key
-                </button>
+              {draft.authenticationMethod !== "chatgpt-oauth" && (
+                <>
+                  <label>
+                    API key
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={props.apiKey}
+                      onChange={(e) => props.setApiKey(e.target.value)}
+                      placeholder={
+                        props.keySaved
+                          ? "Saved securely on this device; leave blank to keep"
+                          : "API key for the configured provider"
+                      }
+                    />
+                  </label>
+                  {props.keySaved && (
+                    <button
+                      type="button"
+                      className="text-button danger"
+                      onClick={props.removeKey}
+                    >
+                      Remove saved key
+                    </button>
+                  )}
+                  <p className="setting-note">
+                    Only text is sent to the provider. The key stays in your
+                    system's secure credential store.
+                  </p>
+                </>
               )}
-              <p className="setting-note">
-                Only text is sent to the provider. The key stays in your system's
-                secure credential store.
-              </p>
             </>
           )}
         </SettingsScroll>
@@ -457,7 +505,12 @@ export default function Settings(props: Props) {
             className="primary"
             title={props.error || undefined}
             aria-invalid={Boolean(props.error)}
-            disabled={props.saving || props.loading || props.modelsBusy}
+            disabled={
+              props.saving ||
+              props.loading ||
+              props.modelsBusy ||
+              props.authBusy
+            }
           >
             {props.saving ? "Saving…" : props.error ? "Retry save" : "Save"}
           </button>
