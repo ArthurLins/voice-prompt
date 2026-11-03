@@ -29,6 +29,16 @@ The native build jobs run in parallel with read-only repository permissions. Win
 
 Only the separate publication job has `contents: write`. It downloads artifacts from the current run, verifies both checksums, and creates a draft release for the existing tag using `--verify-tag`. It publishes and marks the release Latest only after all assets upload successfully. If either build fails, no release is published. Actions artifacts are retained for 14 days.
 
+## Verify build provenance
+
+For releases produced by the attestation-enabled workflow, verify either downloaded installer with the GitHub CLI. Pass the path to the file you downloaded.
+
+```sh
+gh attestation verify "<installer>" --repo ArthurLins/voice-prompt --signer-workflow ArthurLins/voice-prompt/.github/workflows/release.yml
+```
+
+The signed attestation binds the installer digest to the release workflow. Windows code signing and macOS notarization use separate publisher credentials.
+
 ## Next release and recovery
 
 Update all version files, commit, and push a new matching tag. For example, `npm version 1.0.1 --no-git-tag-version` updates the npm files; update Cargo and Tauri as well. Run:
