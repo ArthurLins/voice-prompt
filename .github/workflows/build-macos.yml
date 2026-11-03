@@ -52,9 +52,9 @@ jobs:
           app='src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Voice Prompt.app'
           codesign --verify --deep --strict "$app"
           test "$(lipo -archs "$app/Contents/MacOS/voice-prompt")" = arm64
-          test "$(lipo -archs "$app/Contents/Resources/runtime/whisper-server")" = arm64
+          test "$(lipo -archs "$app/Contents/Resources/runtime/voice-prompt-whisper")" = arm64
           /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$app/Contents/Info.plist"
-          "$app/Contents/Resources/runtime/whisper-server" --help
+          "$app/Contents/Resources/runtime/voice-prompt-whisper" --help
           "$app/Contents/MacOS/voice-prompt" > test-results/app-launch.log 2>&1 &
           app_pid=$!
           sleep 5

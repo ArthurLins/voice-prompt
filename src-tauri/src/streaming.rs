@@ -2,6 +2,25 @@ use eventsource_stream::Event;
 use futures_util::{Stream, StreamExt};
 use serde_json::Value;
 
+const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+
+pub fn limited_body<S, B, E>(body: S) -> impl Stream<Item = Result<B, std::io::Error>>
+where
+    S: Stream<Item = Result<B, E>>,
+    B: AsRef<[u8]>,
+{
+    let mut remaining = MAX_RESPONSE_BYTES;
+    body.map(move |chunk| {
+        let chunk = chunk.map_err(|_| {
+            std::io::Error::other("The connection was interrupted. Your transcript was preserved.")
+        })?;
+        remaining = remaining
+            .checked_sub(chunk.as_ref().len())
+            .ok_or_else(|| std::io::Error::other("Response exceeded the size limit."))?;
+        Ok(chunk)
+    })
+}
+
 pub async fn collect<S, E>(
     mut events: S,
     mut on_delta: impl FnMut(String),
@@ -61,6 +80,21 @@ mod tests {
             s.as_bytes().iter().map(|b| Ok(vec![*b])).collect();
         collect(stream::iter(chunks).eventsource(), |_| {}).await
     }
+    #[tokio::test]
+    async fn rejects_oversized_unterminated_events_before_parsing() {
+        let prefix = b"data: ".to_vec();
+        let input = stream::iter([
+            Ok::<_, std::io::Error>(prefix),
+            Ok(vec![b'x'; MAX_RESPONSE_BYTES]),
+        ]);
+        let mut body = limited_body(input);
+        assert_eq!(body.next().await.unwrap().unwrap(), b"data: ");
+        assert_eq!(
+            body.next().await.unwrap().unwrap_err().to_string(),
+            "Response exceeded the size limit."
+        );
+    }
+
     #[tokio::test]
     async fn parses_fragmented_utf8_and_heartbeats() {
         let data = ": keep-alive\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"Crie uma ação.\"}}]}\r\n\r\ndata: [DONE]\r\n\r\n";

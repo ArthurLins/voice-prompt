@@ -12,7 +12,7 @@ The generated result is committed only on success. After the updated workspace i
 
 ## GPU and CPU
 
-The existing whisper.cpp v1.9.2 models are retained. DirectML is not a backend of this runtime; Vulkan was selected instead. The application checks for the Vulkan loader and its separately bundled `runtime/vulkan/whisper-server.exe`. It tries this backend first, using the GPU selected by Whisper. If startup fails, the original CPU server is started automatically. After a GPU inference failure, the recording remains retryable and the next attempt uses CPU. That fallback is retained until the app restarts. A Vulkan server may also choose CPU internally if no suitable device is available.
+The existing Whisper model files are retained. DirectML is not a backend of this runtime; Vulkan was selected instead. The application checks for the Vulkan loader and its separately bundled `runtime/voice-prompt-whisper-vulkan.exe`. It tries this backend first, using the GPU selected by Whisper. If startup fails, the original CPU worker is started automatically. After a GPU inference failure, the recording remains retryable and the next attempt uses CPU. That fallback is retained until the app restarts. A Vulkan worker may also choose CPU internally if no suitable device is available.
 
 The Vulkan executable lives in a separate directory to avoid loading the CPU distribution's dynamic ggml plugins into its statically linked ggml runtime. Model files are shared via absolute paths, not duplicated. Users need a compatible graphics driver, but no CUDA, NVIDIA SDK or Vulkan SDK.
 

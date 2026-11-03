@@ -31,8 +31,8 @@
     "jsdom": "^29.1.1",
     "prettier": "^3.9.7",
     "typescript": "~5.9.2",
-    "vite": "^6.3.6",
-    "vitest": "^4.1.11"
+    "vite": "^6.4.5",
+    "vitest": "^4.1.12"
   },
   "license": "MIT",
   "repository": {

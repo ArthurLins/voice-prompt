@@ -34,7 +34,10 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     setAlwaysOnTop: mock.top,
     setSize: mock.size,
-    onCloseRequested: async () => () => {},
+    onCloseRequested: async (handler: (event: any) => Promise<void>) => {
+      mock.listeners["window-close-requested"] = handler;
+      return () => {};
+    },
     close: mock.close,
     minimize: mock.minimize,
     listen: async (name: string, handler: any) => {
@@ -686,4 +689,38 @@ test("deleting the selected speech model switches to and persists the remaining 
       ),
     ).toBe(true),
   );
+});
+
+test("closing after deleting a conversation persists its recovery cleanup", async () => {
+  const recoveryId = "eea08028-eddf-4b81-9789-89e11cf1eb12";
+  const originalInvoke = mock.invoke.getMockImplementation()!;
+  mock.invoke.mockImplementation(async (name, args) => {
+    const result = await originalInvoke(name, args);
+    if (name === "load_workspace") {
+      result.conversations[0].recovery = {
+        id: recoveryId,
+        source: "",
+        previous: "",
+      };
+    }
+    return result;
+  });
+  render(<App />);
+  await waitFor(() => expect(mock.listeners["history-action"]).toBeDefined());
+  await act(async () =>
+    mock.listeners["history-action"]({
+      payload: { action: "delete", id: "a" },
+    }),
+  );
+  await act(async () =>
+    mock.listeners["window-close-requested"]({ preventDefault() {} }),
+  );
+  expect(mock.invoke).toHaveBeenCalledWith("save_workspace", {
+    data: expect.objectContaining({
+      conversations: [
+        expect.objectContaining({ id: expect.not.stringMatching(/^a$/) }),
+      ],
+    }),
+    cleanupIds: [recoveryId],
+  });
 });

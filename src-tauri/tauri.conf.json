@@ -39,9 +39,7 @@
       "nsis"
     ],
     "resources": [
-      "runtime/*.dll",
-      "runtime/whisper-server.exe",
-      "runtime/vulkan/*.exe",
+      "runtime/voice-prompt-whisper*.exe",
       "runtime/LICENSE*"
     ],
     "icon": [

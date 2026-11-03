@@ -63,6 +63,19 @@ const newConversation = (): Conversation => ({
 const initial = newConversation();
 const desktop = isTauri();
 let saveQueue = Promise.resolve();
+async function persistWorkspace(data: Workspace, completed: Set<string>) {
+  const cleanupIds = [...completed].filter(
+    (id) =>
+      !data.conversations.some(
+        (conversation) => conversation.recovery?.id === id,
+      ),
+  );
+  await invoke(
+    "save_workspace",
+    cleanupIds.length ? { data, cleanupIds } : { data },
+  );
+  for (const id of cleanupIds) completed.delete(id);
+}
 function readable(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -294,15 +307,7 @@ export default function App() {
       () => {
         if (desktop)
           saveQueue = saveQueue
-            .then(async () => {
-              await invoke<void>("save_workspace", { data: workspace });
-              for (const id of completedAudio.current) {
-                if (workspace.conversations.some((c) => c.recovery?.id === id))
-                  continue;
-                await invoke("delete_recording", { id });
-                completedAudio.current.delete(id);
-              }
-            })
+            .then(() => persistWorkspace(workspace, completedAudio.current))
             .catch((e) => {
               setError(`Could not save: ${readable(e)}`);
             });
@@ -355,7 +360,10 @@ export default function App() {
           if (requestId) await invoke("cancel_request", { id: requestId });
           await saveQueue;
           if (!storageFailed)
-            await invoke("save_workspace", { data: latestWorkspace.current });
+            await persistWorkspace(
+              latestWorkspace.current,
+              completedAudio.current,
+            );
           await getCurrentWindow().destroy();
         } catch (e) {
           closing = false;
@@ -432,7 +440,10 @@ export default function App() {
             latestWorkspace.current = next;
             setWorkspace(next);
             await saveQueue;
-            await invoke("save_workspace", { data: latestWorkspace.current });
+            await persistWorkspace(
+              latestWorkspace.current,
+              completedAudio.current,
+            );
           } catch (e) {
             failure = readable(e);
             setError(failure);
@@ -616,7 +627,7 @@ export default function App() {
           ),
         };
         const checkpointSave = saveQueue.then(() =>
-          invoke("save_workspace", { data: snapshot }),
+          persistWorkspace(snapshot, completedAudio.current),
         );
         saveQueue = checkpointSave.then(
           () => {},

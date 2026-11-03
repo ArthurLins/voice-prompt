@@ -36,8 +36,8 @@ Settings remain in a separate window with custom scrolling. History remains in t
 
 Settings → Connection → Authentication method defaults to **OpenAI Protocol (API key)**, including for existing settings. API URL, model and secure key storage retain their existing behavior. **ChatGPT login (OAuth)** uses the official [Codex App Server](https://learn.chatgpt.com/docs/app-server) for both login and generation. See [ChatGPT connection setup](docs/CHATGPT.md).
 
-- Speech uses whisper.cpp v1.9.2 with `small` and `large-v3-turbo-q5_0`. Models are downloaded from the whisper.cpp model repository on Hugging Face over HTTPS, with fixed SHA-256 digests and expected sizes compiled into the Rust application. Files are verified before installation and before loading into the speech engine. Release builds include Vulkan acceleration for compatible AMD/NVIDIA/Intel GPUs and a separate CPU fallback. No CUDA, NVIDIA SDK or Vulkan SDK is required to run the installed app; GPU support depends on the graphics driver. DirectML is not used.
-- Audio stays local. A resident process handles WAV PCM mono, 16 kHz, 16-bit audio over loopback with a dynamic port and random route. Readiness uses `/health`. Recordings support up to 30 minutes and stop automatically at that limit. Transcription processes pause-aware chunks of at most 60 seconds, preserving every sample in order and showing progress. Each completed chunk is checkpointed; retry resumes unfinished work.
+- Speech uses a pinned whisper.cpp revision with `small` and `large-v3-turbo-q5_0`. Models are downloaded from the whisper.cpp model repository on Hugging Face over HTTPS, with fixed SHA-256 digests and expected sizes compiled into the Rust application. Files are verified before installation and before loading into the speech engine. Release builds include Vulkan acceleration for compatible AMD/NVIDIA/Intel GPUs and a separate CPU fallback. No CUDA, NVIDIA SDK or Vulkan SDK is required to run the installed app; GPU support depends on the graphics driver. DirectML is not used.
+- Audio stays local. A resident Whisper worker receives 16 kHz mono PCM through private child-process pipes. Recordings support up to 30 minutes and stop automatically at that limit. Transcription processes pause-aware chunks of at most 60 seconds, preserving every sample in order and showing progress. Each completed chunk is checkpointed; retry resumes unfinished work. The desktop app encrypts history, recovery audio and checkpoints using a key in the OS credential store. The first launch after upgrade migrates existing desktop files. Copying the data files alone to another computer does not transfer the key.
 - The original transcript, relevant previous prompt and clarification answers are sent to the configured API. The default remains OpenRouter and `openai/gpt-5.6-luna`. There is no preliminary translation API call, telemetry or web research during generation.
 - History, pending answers and preferences are stored without encryption in `%APPDATA%\com.voiceprompt.desktop\workspace.json`. API keys stay separately in Windows Credential Manager. Finished recordings are saved separately under `recordings/` in the same application data directory, before transcription. Recovery pointers survive restart. Audio and checkpoints are removed after a completed prompt is saved or its history item is deleted. While actively recording, audio is buffered in memory; a crash before finishing can still lose that in-progress recording.
 - Failed or incomplete generation does not replace a completed prompt. **Try again** reuses saved audio if transcription failed, or the transcript if generation failed. Pending answers and the original refinement context are preserved; incomplete generated text is not presented as final. A failed refinement must be retried or its history item deleted before starting another refinement of that item; new prompts remain independent.
@@ -65,7 +65,7 @@ See [the API review](docs/API_REVIEW.md) for protocol details and the previous v
 
 ## Development
 
-Build requirements: Windows x64, Node.js 22 or later, stable Rust with MSVC, Visual Studio Build Tools with C++/Windows SDK, and WebView2. Using the packaged app does not require Node or Rust.
+Build requirements: Windows x64, Node.js 22 or later, stable Rust with MSVC, Visual Studio Build Tools with C++/Windows SDK, CMake, and WebView2. Using the packaged app does not require Node or Rust.
 
 ```powershell
 git clone https://github.com/ArthurLins/voice-prompt.git
@@ -77,7 +77,7 @@ npm run setup:vulkan
 npm run desktop
 ```
 
-The speech setup script downloads official binaries and licenses with SHA256 verification. Close the app before running it. Models are chosen and downloaded inside the application. The script can still fetch development models with `-Model small` or `-Model large-v3-turbo-q5_0`; they are excluded from installers.
+The speech setup scripts build the worker from SHA-256-verified upstream source. Close the app before running it. Models are chosen and downloaded inside the application. The script can still fetch development models with `-Model small` or `-Model large-v3-turbo-q5_0`; they are excluded from installers.
 
 ```powershell
 npm run build

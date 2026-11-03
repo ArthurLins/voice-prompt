@@ -6,31 +6,44 @@ mod chatgpt;
 mod clarification;
 mod models;
 mod platform;
+mod private_storage;
 mod prompts;
 mod recordings;
 mod streaming;
+use private_storage::Storage;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    process::{Child, Command, Stdio},
-    sync::Mutex,
-    time::Duration,
-};
+use std::{collections::HashMap, path::PathBuf, process::Stdio, sync::Mutex, time::Duration};
 use tauri::{ipc::Channel, Emitter, Manager, State};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
 struct Engine {
-    child: Child,
-    url: String,
+    child: tokio::process::Child,
+    input: tokio::process::ChildStdin,
+    output: tokio::process::ChildStdout,
     model: String,
     gpu: bool,
 }
-impl Drop for Engine {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+impl Engine {
+    async fn transcribe(&mut self, language: &str, pcm: &[u8]) -> std::io::Result<String> {
+        let language = match language {
+            "pt" => 0,
+            "en" => 1,
+            "es" => 2,
+            "auto" => 3,
+            _ => return Err(std::io::Error::other("Invalid transcription language.")),
+        };
+        self.input.write_u8(language).await?;
+        self.input.write_u32_le(pcm.len() as u32).await?;
+        self.input.write_all(pcm).await?;
+        let length = self.output.read_u32_le().await? as usize;
+        if length > 240_000 {
+            return Err(std::io::Error::other("Invalid transcript length."));
+        }
+        let mut text = vec![0; length];
+        self.output.read_exact(&mut text).await?;
+        String::from_utf8(text).map_err(std::io::Error::other)
     }
 }
 #[derive(Default)]
@@ -158,24 +171,84 @@ fn data_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("workspace.json"))
 }
+const CLEANUP_FIELD: &str = "storageCleanupIds";
+
+fn finish_recording_cleanup(
+    app: &tauri::AppHandle,
+    storage: &Storage,
+    path: &std::path::Path,
+    data: &mut Value,
+) -> Result<(), String> {
+    let Some(ids) = data
+        .as_object_mut()
+        .and_then(|object| object.remove(CLEANUP_FIELD))
+    else {
+        return Ok(());
+    };
+    if let Some(ids) = ids.as_array() {
+        for id in ids.iter().filter_map(Value::as_str) {
+            let referenced = data["conversations"]
+                .as_array()
+                .is_some_and(|conversations| {
+                    conversations
+                        .iter()
+                        .any(|item| item["recovery"]["id"].as_str() == Some(id))
+                });
+            if !referenced && uuid::Uuid::parse_str(id).is_ok() {
+                remove_recording(app, id)?;
+            }
+        }
+    }
+    storage.write(path, &serde_json::to_vec(data).map_err(|e| e.to_string())?)
+}
+
 #[tauri::command]
 fn load_workspace(app: tauri::AppHandle, state: State<AppState>) -> Result<Value, String> {
     let _guard = state.storage.lock().map_err(|e| e.to_string())?;
     let path = data_file(&app)?;
+    let dir = path.parent().ok_or("Invalid workspace path.")?;
+    let storage = Storage::open(dir)?;
+    storage.migrate(&path.with_extension("tmp"))?;
+    let recordings = recording_dir(&app)?;
+    for file in std::fs::read_dir(recordings).map_err(|error| error.to_string())? {
+        let file = file.map_err(|error| error.to_string())?;
+        let path = file.path();
+        if matches!(
+            path.extension().and_then(|ext| ext.to_str()),
+            Some("wav" | "json" | "partial" | "tmp")
+        ) && path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .is_some_and(|stem| uuid::Uuid::parse_str(stem).is_ok())
+            && file
+                .file_type()
+                .map_err(|error| error.to_string())?
+                .is_file()
+        {
+            storage.migrate(&path)?;
+        }
+    }
     if !path.exists() {
         return Ok(Value::Null);
     }
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    serde_json::from_slice(&bytes)
-        .map_err(|_| "Invalid history. The original file was preserved.".into())
+    let bytes = storage.read(&path)?;
+    let mut data = serde_json::from_slice(&bytes)
+        .map_err(|_| "Invalid history. The original file was preserved.")?;
+    finish_recording_cleanup(&app, &storage, &path, &mut data)?;
+    Ok(data)
 }
 #[tauri::command]
 fn save_workspace(
     app: tauri::AppHandle,
     state: State<AppState>,
-    data: Value,
+    mut data: Value,
+    cleanup_ids: Option<Vec<String>>,
 ) -> Result<(), String> {
     let _guard = state.storage.lock().map_err(|e| e.to_string())?;
+    if let Some(ids) = cleanup_ids.filter(|ids| !ids.is_empty()) {
+        let object = data.as_object_mut().ok_or("Invalid workspace.")?;
+        object.insert(CLEANUP_FIELD.into(), json!(ids));
+    }
     let bytes = serde_json::to_vec(&data).map_err(|e| e.to_string())?;
     if bytes.len() > 20_000_000 {
         return Err(
@@ -183,9 +256,9 @@ fn save_workspace(
         );
     }
     let path = data_file(&app)?;
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(tmp, path).map_err(|e| e.to_string())
+    let storage = Storage::open(path.parent().ok_or("Invalid local storage path.")?)?;
+    storage.write(&path, &bytes)?;
+    finish_recording_cleanup(&app, &storage, &path, &mut data)
 }
 fn runtime_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if cfg!(debug_assertions) {
@@ -205,28 +278,28 @@ async fn voice_status(app: tauri::AppHandle, state: State<'_, AppState>) -> Resu
     let installed = models::installed(&dir).await;
     let runtime = runtime_dir(&app)?;
     Ok(
-        json!({"ready": platform::speech_server(&runtime, false).is_file() && !installed.is_empty(),
+        json!({"ready": platform::speech_worker(&runtime, false).is_file() && !installed.is_empty(),
         "model": installed.first(), "models": installed,
         "backend": platform::backend(&runtime)}),
     )
 }
-async fn ensure_engine(
+async fn ensure_engine<'a>(
     app: &tauri::AppHandle,
-    state: &AppState,
+    state: &'a AppState,
     selected: &str,
-) -> Result<String, String> {
+) -> Result<tokio::sync::MutexGuard<'a, Option<Engine>>, String> {
     let spec = models::spec(selected)?;
     {
         let mut engine = state.engine.lock().await;
-        if let Some(engine) = engine.as_mut() {
-            if engine.model == format!("ggml-{selected}.bin")
-                && engine
+        if let Some(current) = engine.as_mut() {
+            if current.model == format!("ggml-{selected}.bin")
+                && current
                     .child
                     .try_wait()
                     .map_err(|e| e.to_string())?
                     .is_none()
             {
-                return Ok(engine.url.clone());
+                return Ok(engine);
             }
         }
     }
@@ -236,12 +309,12 @@ async fn ensure_engine(
         .map_err(|_| "Model unavailable or corrupted. Download it in Settings / Audio.")?;
     ensure_engine_at(&runtime_dir(app)?, &path, state, selected).await
 }
-async fn ensure_engine_at(
+async fn ensure_engine_at<'a>(
     dir: &std::path::Path,
     model_path: &std::path::Path,
-    state: &AppState,
+    state: &'a AppState,
     selected: &str,
-) -> Result<String, String> {
+) -> Result<tokio::sync::MutexGuard<'a, Option<Engine>>, String> {
     if !matches!(selected, "small" | "large-v3-turbo-q5_0") {
         return Err("Invalid speech model.".into());
     }
@@ -255,7 +328,7 @@ async fn ensure_engine_at(
                 .map_err(|e| e.to_string())?
                 .is_none()
         {
-            return Ok(engine.url.clone());
+            return Ok(guard);
         }
     }
     *guard = None;
@@ -268,9 +341,8 @@ async fn ensure_engine_at(
     {
         match start_engine(&dir, model_path, &model, true).await {
             Ok(engine) => {
-                let url = engine.url.clone();
                 *guard = Some(engine);
-                return Ok(url);
+                return Ok(guard);
             }
             Err(_) => state
                 .gpu_failed
@@ -278,9 +350,8 @@ async fn ensure_engine_at(
         }
     }
     let engine = start_engine(&dir, model_path, &model, false).await?;
-    let url = engine.url.clone();
     *guard = Some(engine);
-    Ok(url)
+    Ok(guard)
 }
 async fn start_engine(
     dir: &std::path::Path,
@@ -288,80 +359,77 @@ async fn start_engine(
     model: &str,
     gpu: bool,
 ) -> Result<Engine, String> {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
-    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    drop(listener);
-    let route = format!("/{}", uuid::Uuid::new_v4().simple());
     let threads = std::thread::available_parallelism()
         .map(|n| n.get().saturating_sub(2).clamp(1, 8))
         .unwrap_or(4);
-    let server = platform::speech_server(dir, gpu);
-    let mut cmd = Command::new(&server);
-    cmd.current_dir(server.parent().unwrap_or(dir))
-        .args([
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "--request-path",
-            &route,
-            "-m",
-            &model_path.to_string_lossy(),
-            "-t",
-            &threads.to_string(),
-            "-nt",
-            "-l",
-            "pt",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    if !gpu {
-        cmd.arg("-ng");
-    }
+    let worker = platform::speech_worker(dir, gpu);
+    let mut cmd = tokio::process::Command::new(&worker);
+    cmd.current_dir(worker.parent().unwrap_or(dir))
+        .arg(model_path)
+        .arg(threads.to_string())
+        .arg(if gpu { "gpu" } else { "cpu" })
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
     #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
-    let child = cmd
+    cmd.creation_flags(0x08000000);
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("Could not start local Whisper: {e}"))?;
-    let mut engine = Engine {
+    let mut output = child.stdout.take().ok_or("Missing Whisper output pipe.")?;
+    let input = child.stdin.take().ok_or("Missing Whisper input pipe.")?;
+    let mut ready = [0; 4];
+    tokio::time::timeout(Duration::from_secs(90), output.read_exact(&mut ready))
+        .await
+        .map_err(|_| "The speech model took too long to load.")?
+        .map_err(|_| {
+            "Whisper exited while loading. Check available memory and reinstall local speech."
+        })?;
+    if &ready != b"VPW1" {
+        return Err("Incompatible speech runtime. Reinstall local speech.".into());
+    }
+    Ok(Engine {
         child,
-        url: format!("http://127.0.0.1:{port}{route}"),
+        input,
+        output,
         model: model.to_owned(),
         gpu,
-    };
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(1))
-        .build()
-        .map_err(|e| e.to_string())?;
-    for _ in 0..180 {
-        if engine
-            .child
-            .try_wait()
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
-            return Err(
-                "Whisper exited while loading. Check available memory and reinstall local speech."
-                    .into(),
-            );
-        }
-        if client
-            .get(format!("{}/health", engine.url))
-            .send()
-            .await
-            .is_ok_and(|r| r.status().is_success())
-        {
-            return Ok(engine);
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-    Err("The model took too long to load.".into())
+    })
 }
+
+async fn transcribe_chunk(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    selected: &str,
+    language: &str,
+    wav: &[u8],
+) -> Result<String, String> {
+    let mut slot = ensure_engine(app, state, selected).await?;
+    // A cancelled or failed exchange leaves an incomplete frame. Dropping the
+    // taken worker closes its private pipes and prevents it from being reused.
+    let mut engine = slot.take().ok_or("Whisper was not started.")?;
+    let result = tokio::time::timeout(
+        Duration::from_secs(600),
+        engine.transcribe(language, &wav[44..]),
+    )
+    .await;
+    match result {
+        Ok(Ok(text)) => {
+            *slot = Some(engine);
+            Ok(text.trim().to_owned())
+        }
+        _ => {
+            if engine.gpu {
+                state
+                    .gpu_failed
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            Err("Local transcription stopped. Your recording and completed parts are saved. Click Try again.".into())
+        }
+    }
+}
+
 #[tauri::command]
 async fn warm_voice(
     app: tauri::AppHandle,
@@ -391,14 +459,17 @@ fn save_recording(app: tauri::AppHandle, id: String, audio: String) -> Result<()
         .map_err(|_| "Invalid audio.")?;
     validate_wav(&bytes)?;
     let path = recordings::path(&recording_dir(&app)?, &id)?;
-    let tmp = path.with_extension("partial");
-    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(tmp, path).map_err(|e| e.to_string())
+    let workspace = data_file(&app)?;
+    Storage::open(workspace.parent().ok_or("Invalid local storage path.")?)?.write(&path, &bytes)
 }
-#[tauri::command]
-fn delete_recording(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let path = recordings::path(&recording_dir(&app)?, &id)?;
-    for file in [path.clone(), path.with_extension("json")] {
+fn remove_recording(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
+    let path = recordings::path(&recording_dir(app)?, id)?;
+    for file in [
+        path.clone(),
+        path.with_extension("json"),
+        path.with_extension("partial"),
+        path.with_extension("tmp"),
+    ] {
         match std::fs::remove_file(file) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -432,12 +503,18 @@ async fn process(
         return Err("Invalid language.".into());
     }
     let transcript = if audio.is_some() || audio_id.is_some() {
+        let storage = Storage::open(
+            data_file(app)?
+                .parent()
+                .ok_or("Invalid local storage path.")?,
+        )?;
         let cache_path = audio_id
             .as_ref()
             .map(|id| recordings::path(&recording_dir(app)?, id).map(|p| p.with_extension("json")))
             .transpose()?;
         let bytes = if let Some(id) = &audio_id {
-            std::fs::read(recordings::path(&recording_dir(app)?, id)?)
+            storage
+                .read(&recordings::path(&recording_dir(app)?, id)?)
                 .map_err(|_| "Could not read the saved recording. Check local storage.")?
         } else {
             base64::engine::general_purpose::STANDARD
@@ -449,6 +526,7 @@ async fn process(
             .as_ref()
             .map(|p| {
                 recordings::load_checkpoint(
+                    &storage,
                     p,
                     &settings.voice_model,
                     &settings.language,
@@ -456,62 +534,19 @@ async fn process(
                 )
             })
             .unwrap_or_default();
-        let client = reqwest::Client::builder()
-            .no_proxy()
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(600))
-            .build()
-            .map_err(|e| e.to_string())?;
         for chunk in chunks.iter().skip(done.len()) {
-            let url = ensure_engine(app, state, &settings.voice_model).await?;
             let _ = channel.send(Progress::Phase(format!(
                 "Transcribing part {} of {}…",
                 done.len() + 1,
                 chunks.len()
             )));
-            let part = reqwest::multipart::Part::bytes(chunk.clone())
-                .file_name("recording.wav")
-                .mime_str("audio/wav")
-                .map_err(|e| e.to_string())?;
-            let form = reqwest::multipart::Form::new()
-                .part("file", part)
-                .text("response_format", "json")
-                .text("language", settings.language.clone())
-                .text("temperature", "0.0");
-            let response = client
-                .post(format!("{url}/inference"))
-                .multipart(form)
-                .send()
-                .await;
-            let response = match response {
-                Ok(r) if r.status().is_success() => r,
-                other => {
-                    let mut engine = state.engine.lock().await;
-                    if engine.as_ref().is_some_and(|e| e.gpu) {
-                        state
-                            .gpu_failed
-                            .store(true, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    *engine = None;
-                    let reason = match other {
-                        Ok(r) => format!("HTTP {}", r.status()),
-                        Err(_) => "connection failure or timeout".into(),
-                    };
-                    return Err(format!("Local transcription stopped ({reason}). Your recording and completed parts are saved. Click Try again."));
-                }
-            };
-            let value: Value = response
-                .json()
-                .await
-                .map_err(|_| "Invalid local response. Your recording is saved; click Try again.")?;
-            let text = value["text"]
-                .as_str()
-                .ok_or("Local response has no transcript. Click Try again.")?
-                .trim()
-                .to_owned();
+            let text =
+                transcribe_chunk(app, state, &settings.voice_model, &settings.language, chunk)
+                    .await?;
             done.push(text);
             if let Some(path) = &cache_path {
                 recordings::save_checkpoint(
+                    &storage,
                     path,
                     &settings.voice_model,
                     &settings.language,
@@ -580,7 +615,13 @@ async fn process(
         return Err("Enter the model in Settings.".into());
     }
     let _ = channel.send(Progress::Phase("Structuring your prompt…".into()));
-    let client = reqwest::Client::builder()
+    let client = reqwest::Client::builder();
+    let client = if endpoint.starts_with("http://") {
+        client.no_proxy()
+    } else {
+        client
+    };
+    let client = client
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(600))
@@ -609,14 +650,21 @@ async fn process(
             _ => format!("The provider returned HTTP {status}. Please try again."),
         });
     }
+    let body = streaming::limited_body(response.bytes_stream());
     if settings.ask_questions {
-        let value: Value = response
-            .json()
+        use futures_util::TryStreamExt;
+        let bytes = body
+            .try_fold(Vec::new(), |mut bytes, chunk| async move {
+                bytes.extend_from_slice(&chunk);
+                Ok(bytes)
+            })
             .await
+            .map_err(|error| error.to_string())?;
+        let value = serde_json::from_slice(&bytes)
             .map_err(|_| "Invalid response from the clarification API.")?;
         return clarification::parse(value);
     }
-    streaming::collect(response.bytes_stream().eventsource(), |delta| {
+    streaming::collect(body.eventsource(), |delta| {
         let _ = channel.send(Progress::Delta(delta));
     })
     .await
@@ -646,7 +694,7 @@ async fn run_request(
             .clone()
     };
     let result = tokio::select! { biased;
-        _ = token.cancelled() => { *state.engine.lock().await = None; Err("Operation cancelled. Received text was preserved.".into()) },
+        _ = token.cancelled() => Err("Operation cancelled. Received text was preserved.".into()),
         result = process(&app, &state, audio, audio_id, text, previous, settings, channel, transcribe_only, clarification_turns) => result,
     };
     state.jobs.lock().map_err(|e| e.to_string())?.remove(&id);
@@ -881,7 +929,6 @@ fn main() {
         .manage(chatgpt::AuthState::default())
         .invoke_handler(tauri::generate_handler![
             save_recording,
-            delete_recording,
             chatgpt::chatgpt_status,
             chatgpt::chatgpt_models,
             chatgpt::chatgpt_login,
@@ -938,28 +985,32 @@ mod tests {
     async fn local_vulkan_and_cpu_fallback() {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
         let state = AppState::default();
-        ensure_engine_at(
-            &dir,
-            &dir.join("ggml-large-v3-turbo-q5_0.bin"),
-            &state,
-            "large-v3-turbo-q5_0",
-        )
-        .await
-        .unwrap();
+        drop(
+            ensure_engine_at(
+                &dir,
+                &dir.join("ggml-large-v3-turbo-q5_0.bin"),
+                &state,
+                "large-v3-turbo-q5_0",
+            )
+            .await
+            .unwrap(),
+        );
         assert!(state.engine.lock().await.as_ref().unwrap().gpu);
         *state.engine.lock().await = None;
         // Same fallback state set when Vulkan fails during initialization/inference.
         state
             .gpu_failed
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        ensure_engine_at(
-            &dir,
-            &dir.join("ggml-large-v3-turbo-q5_0.bin"),
-            &state,
-            "large-v3-turbo-q5_0",
-        )
-        .await
-        .unwrap();
+        drop(
+            ensure_engine_at(
+                &dir,
+                &dir.join("ggml-large-v3-turbo-q5_0.bin"),
+                &state,
+                "large-v3-turbo-q5_0",
+            )
+            .await
+            .unwrap(),
+        );
         assert!(!state.engine.lock().await.as_ref().unwrap().gpu);
         *state.engine.lock().await = None;
     }

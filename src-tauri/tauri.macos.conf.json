@@ -24,7 +24,7 @@
   },
   "bundle": {
     "targets": ["app", "dmg"],
-    "resources": ["runtime/whisper-server", "runtime/LICENSE*"],
+    "resources": ["runtime/voice-prompt-whisper", "runtime/LICENSE*"],
     "icon": ["icons/icon.icns"],
     "macOS": {
       "minimumSystemVersion": "13.0",

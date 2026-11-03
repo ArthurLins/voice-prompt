@@ -1,66 +1,53 @@
-"""Test the installed engine with a local WAV: python scripts/smoke-voice.py path.wav [pt]."""
+"""Test the private Whisper worker with a 16 kHz mono PCM WAV."""
 import argparse
 import json
 import pathlib
-import socket
+import struct
 import subprocess
 import sys
 import time
-import urllib.request
-import uuid
+import wave
 
 root = pathlib.Path(__file__).resolve().parent.parent
-(root / 'test-results').mkdir(exist_ok=True)
 runtime = root / 'src-tauri' / 'runtime'
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('audio')
-parser.add_argument('language', nargs='?', default='pt')
+parser.add_argument('language', nargs='?', default='pt', choices=['pt', 'en', 'es', 'auto'])
 parser.add_argument('--gpu', action='store_true')
 parser.add_argument('--model', choices=['small', 'large-v3-turbo-q5_0'])
 parser.add_argument('--expect', help='Fail if the transcription does not contain this text')
 args = parser.parse_args()
-if args.model:
-    model = f'ggml-{args.model}.bin'
-else:
-    model = json.loads((runtime / 'model.json').read_text(encoding='utf-8-sig'))['file']
-audio = pathlib.Path(args.audio).read_bytes()
-language = args.language
-with socket.socket() as listener:
-    listener.bind(('127.0.0.1', 0))
-    port = listener.getsockname()[1]
-route = '/' + uuid.uuid4().hex
-url = f'http://127.0.0.1:{port}{route}'
-opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+model = (f'ggml-{args.model}.bin' if args.model else
+         json.loads((runtime / 'model.json').read_text(encoding='utf-8-sig'))['file'])
+with wave.open(args.audio, 'rb') as audio:
+    if (audio.getnchannels(), audio.getsampwidth(), audio.getframerate()) != (1, 2, 16000):
+        raise ValueError('Expected 16 kHz mono 16-bit PCM')
+    pcm = audio.readframes(audio.getnframes())
+language = ['pt', 'en', 'es', 'auto'].index(args.language)
+request = struct.pack('<BI', language, len(pcm)) + pcm
+worker = runtime / 'voice-prompt-whisper'
+if sys.platform == 'win32':
+    worker = runtime / ('voice-prompt-whisper-vulkan.exe' if args.gpu else 'voice-prompt-whisper.exe')
+(root / 'test-results').mkdir(exist_ok=True)
+log_name = 'whisper-smoke-gpu.log' if args.gpu else 'whisper-smoke.log'
 started = time.perf_counter()
-with open(root / 'test-results' / ('whisper-smoke-gpu.log' if args.gpu else 'whisper-smoke.log'), 'w') as log:
-    server = runtime / (('vulkan/whisper-server.exe' if args.gpu else 'whisper-server.exe') if sys.platform == 'win32' else 'whisper-server')
-    process = subprocess.Popen([str(server), '-m', str(runtime / model), '--host', '127.0.0.1', '--port', str(port), '--request-path', route, '-nt', '-t', '8'] + ([] if args.gpu else ['-ng']), cwd=server.parent, stdout=log, stderr=log, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    try:
-        for _ in range(180):
-            if process.poll() is not None:
-                raise RuntimeError('Whisper exited before becoming ready; check test-results/whisper-smoke.log')
-            try:
-                opener.open(url + "/health", timeout=1)
-                break
-            except OSError:
-                time.sleep(.5)
-        else:
-            raise TimeoutError('Whisper startup timed out')
-        print(f'Load: {time.perf_counter() - started:.2f}s', flush=True)
-        for attempt in range(2):
-            boundary = uuid.uuid4().hex
-            body = f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="test.wav"\r\nContent-Type: audio/wav\r\n\r\n'.encode() + audio + b'\r\n'
-            for key, value in [('language', language), ('response_format', 'json'), ('temperature', '0.0')]:
-                body += f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'.encode()
-            body += f'--{boundary}--\r\n'.encode()
-            request = urllib.request.Request(url + '/inference', data=body, headers={'Content-Type': f'multipart/form-data; boundary={boundary}'})
-            started = time.perf_counter()
-            with opener.open(request, timeout=300) as response:
-                result = json.load(response)
-            assert result.get('text', '').strip(), result
-            if args.expect and args.expect.casefold() not in result['text'].casefold():
-                raise AssertionError(f'Expected {args.expect!r} in transcription: {result}')
-            print(json.dumps({'attempt': attempt + 1, 'seconds': round(time.perf_counter() - started, 2), 'text': result['text']}, ensure_ascii=False), flush=True)
-    finally:
-        process.terminate()
-        process.wait(timeout=10)
+with open(root / 'test-results' / log_name, 'wb') as log:
+    result = subprocess.run(
+        [str(worker), str(runtime / model), '8', 'gpu' if args.gpu else 'cpu'],
+        cwd=worker.parent, input=request * 2, stdout=subprocess.PIPE, stderr=log,
+        timeout=300, check=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+    )
+if not result.stdout.startswith(b'VPW1'):
+    raise RuntimeError('Invalid Whisper worker readiness response')
+offset = 4
+for attempt in range(2):
+    size, = struct.unpack_from('<I', result.stdout, offset)
+    offset += 4
+    text = result.stdout[offset:offset + size].decode('utf-8').strip()
+    offset += size
+    if not text or (args.expect and args.expect.casefold() not in text.casefold()):
+        raise AssertionError(f'Unexpected transcription: {text!r}')
+    print(json.dumps({'attempt': attempt + 1, 'text': text}, ensure_ascii=False))
+if offset != len(result.stdout):
+    raise RuntimeError('Unexpected trailing data in worker response')
+print(f'Load and transcribe twice: {time.perf_counter() - started:.2f}s')

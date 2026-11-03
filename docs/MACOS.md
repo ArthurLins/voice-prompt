@@ -2,7 +2,7 @@
 
 Targets Apple Silicon (M1 and later), macOS 13+. Intel builds are not provided. New recordings, refinement, copy/open, history, clarification, profiles, model downloads, recovery, and preferences share their implementation with Windows.
 
-- Speech: whisper.cpp v1.9.2, arm64, embedded Metal shaders, Accelerate, CPU fallback (`-ng`), and no Homebrew runtime dependencies. Models are downloaded and verified inside the app.
+- Speech: pinned whisper.cpp source, arm64, embedded Metal shaders, Accelerate, CPU fallback, and no Homebrew runtime dependencies. Models are downloaded and verified inside the app.
 - Provider keys: macOS Keychain. History, recordings, and models: `~/Library/Application Support/com.voiceprompt.desktop/`.
 - Microphone: the first recording requests permission. If denied, enable Voice Prompt in System Settings → Privacy & Security → Microphone.
 - Shortcuts: Cmd+Shift+Space starts/finishes recording; Cmd+Enter retries. These remain window shortcuts, not global shortcuts.

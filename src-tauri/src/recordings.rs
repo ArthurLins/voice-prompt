@@ -1,4 +1,5 @@
 //! Local recovery files and lossless, pause-aware PCM chunking.
+use crate::private_storage::Storage;
 use std::path::{Path, PathBuf};
 
 pub const MAX_SECONDS: usize = 30 * 60;
@@ -76,8 +77,15 @@ struct Checkpoint {
     language: String,
     chunks: Vec<String>,
 }
-pub fn load_checkpoint(path: &Path, model: &str, language: &str, count: usize) -> Vec<String> {
-    std::fs::read(path)
+pub fn load_checkpoint(
+    storage: &Storage,
+    path: &Path,
+    model: &str,
+    language: &str,
+    count: usize,
+) -> Vec<String> {
+    storage
+        .read(path)
         .ok()
         .and_then(|b| serde_json::from_slice::<Checkpoint>(&b).ok())
         .filter(|c| c.model == model && c.language == language && c.chunks.len() <= count)
@@ -85,6 +93,7 @@ pub fn load_checkpoint(path: &Path, model: &str, language: &str, count: usize) -
         .unwrap_or_default()
 }
 pub fn save_checkpoint(
+    storage: &Storage,
     path: &Path,
     model: &str,
     language: &str,
@@ -96,9 +105,7 @@ pub fn save_checkpoint(
         chunks: chunks.to_vec(),
     };
     let bytes = serde_json::to_vec(&checkpoint).map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(tmp, path).map_err(|e| e.to_string())
+    storage.write(path, &bytes)
 }
 
 #[cfg(test)]
@@ -128,18 +135,19 @@ mod tests {
             "".into(),
             "sem traduzir minha entrada".into(),
         ];
-        save_checkpoint(&path, "small", "pt", &done).unwrap();
-        assert_eq!(load_checkpoint(&path, "small", "pt", 5), done);
-        assert!(load_checkpoint(&path, "large-v3-turbo-q5_0", "pt", 5).is_empty());
-        assert!(load_checkpoint(&path, "small", "en", 5).is_empty());
-        assert!(load_checkpoint(&path, "small", "pt", 2).is_empty());
-        save_checkpoint(&path, "small", "pt", &["replacement".into()]).unwrap();
+        let storage = Storage::from_key(&[7; 32]).unwrap();
+        save_checkpoint(&storage, &path, "small", "pt", &done).unwrap();
+        assert_eq!(load_checkpoint(&storage, &path, "small", "pt", 5), done);
+        assert!(load_checkpoint(&storage, &path, "large-v3-turbo-q5_0", "pt", 5).is_empty());
+        assert!(load_checkpoint(&storage, &path, "small", "en", 5).is_empty());
+        assert!(load_checkpoint(&storage, &path, "small", "pt", 2).is_empty());
+        save_checkpoint(&storage, &path, "small", "pt", &["replacement".into()]).unwrap();
         assert_eq!(
-            load_checkpoint(&path, "small", "pt", 5),
+            load_checkpoint(&storage, &path, "small", "pt", 5),
             vec!["replacement"]
         );
         std::fs::write(&path, b"broken").unwrap();
-        assert!(load_checkpoint(&path, "small", "pt", 5).is_empty());
+        assert!(load_checkpoint(&storage, &path, "small", "pt", 5).is_empty());
         std::fs::remove_file(path).unwrap();
     }
     #[test]

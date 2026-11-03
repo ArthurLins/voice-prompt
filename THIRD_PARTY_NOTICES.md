@@ -4,11 +4,11 @@ Dependencies retain their own licenses. The npm and Cargo lockfiles identify the
 
 Local speech setup downloads these components separately; their binaries and models are not stored in this Git repository:
 
-- **whisper.cpp**: https://github.com/ggml-org/whisper.cpp — MIT. The setup script downloads the license for the pinned runtime version and verifies its SHA256.
+- **whisper.cpp**: https://github.com/ggml-org/whisper.cpp — MIT. The setup scripts copy the license from the SHA-256-verified source archive.
 - **OpenAI Whisper**: https://github.com/openai/whisper — MIT. The setup script downloads and verifies the Whisper license alongside the model files.
 - Converted model files are downloaded from https://huggingface.co/ggerganov/whisper.cpp and checked against the hashes in `scripts/setup-voice.ps1`.
 
-The Vulkan server is statically built from the pinned whisper.cpp v1.9.2 source (including ggml) under the same MIT license. The LunarG Vulkan SDK is build tooling only and is not bundled with the application. Its installer is SHA256-verified using the value published in https://vulkan.lunarg.com/sdk/files.json. The graphics driver supplies the Vulkan loader at runtime.
+The speech workers are statically built from pinned whisper.cpp source (including ggml) under the same MIT license. The LunarG Vulkan SDK is build tooling only and is not bundled with the application. Its installer is SHA256-verified using the value published in https://vulkan.lunarg.com/sdk/files.json. The graphics driver supplies the Vulkan loader at runtime.
 
 Packaged desktop builds include the downloaded speech licenses through the Tauri `runtime/LICENSE*` resource configuration. Keep these notices with redistributed speech components.
 
